@@ -649,17 +649,17 @@ static QString* psh_convert(struct PixelShader *ps)
         case PS_TEXTUREMODES_DOT_ZW:
             qstring_append_fmt(vars, "vec4 t%d = vec4(0.0); /* PS_TEXTUREMODES_DOT_ZW */\n",
                                i);
-            assert(false); /* Unimplemented */
+            // assert(false); /* Unimplemented */
             break;
         case PS_TEXTUREMODES_DOT_RFLCT_DIFF:
             qstring_append_fmt(vars, "vec4 t%d = vec4(0.0); /* PS_TEXTUREMODES_DOT_RFLCT_DIFF */\n",
                                i);
-            assert(false); /* Unimplemented */
+            // assert(false); /* Unimplemented */
             break;
         case PS_TEXTUREMODES_DOT_RFLCT_SPEC:
             qstring_append_fmt(vars, "vec4 t%d = vec4(0.0); /* PS_TEXTUREMODES_DOT_RFLCT_SPEC */\n",
                                i);
-            assert(false); /* Unimplemented */
+            // assert(false); /* Unimplemented */
             break;
         case PS_TEXTUREMODES_DOT_STR_3D:
             qstring_append_fmt(vars, "vec4 t%d = vec4(0.0); /* PS_TEXTUREMODES_DOT_STR_3D */\n",
