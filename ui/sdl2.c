@@ -31,6 +31,8 @@
 #include "ui/sdl2.h"
 #include "sysemu/sysemu.h"
 
+#include "hw/xbox/nv2a/perf_config.h"
+
 static int sdl2_num_outputs;
 static struct sdl2_console *sdl2_console;
 
@@ -66,6 +68,70 @@ static struct sdl2_console *get_scon_from_window(uint32_t window_id)
     return NULL;
 }
 
+//
+// Hack to create a window/GL context earlier
+//
+// For xqemu, we really only expect to have one window, so let's create it
+// early. We also set up the GL context here at the same time. When pgraph_init
+// happens (after this), it will create a context which is "shared" with the one
+// we are creating now. This allows us to share surface data and display the
+// framebuffer at runtime.
+//
+
+SDL_Window    *m_window;
+SDL_GLContext  m_context;
+
+static void sdl2_early_window_create(void);
+
+static void sdl2_early_window_create(void)
+{
+    // Initialize SDL Video
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_NOPARACHUTE) < 0) {
+        fprintf(stderr, "Failed to initialize SDL video\n");
+        exit(1);
+    }
+
+    // Initialize rendering context
+    SDL_GL_SetAttribute(SDL_GL_RED_SIZE, 8);
+    SDL_GL_SetAttribute(SDL_GL_GREEN_SIZE, 8);
+    SDL_GL_SetAttribute(SDL_GL_BLUE_SIZE, 8);
+    SDL_GL_SetAttribute(SDL_GL_ALPHA_SIZE, 8);
+    SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
+    SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
+    SDL_GL_SetAttribute(
+        SDL_GL_CONTEXT_PROFILE_MASK,
+        SDL_GL_CONTEXT_PROFILE_CORE);
+    SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
+    SDL_GL_SetSwapInterval(1);
+
+    // Create main window
+    m_window = SDL_CreateWindow(
+        "SDL App",
+        SDL_WINDOWPOS_CENTERED,
+        SDL_WINDOWPOS_CENTERED,
+#if RES_SCALE_4X
+        640*2, 480*2,
+#else 
+        640, 480,
+#endif
+        SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE);
+    if (m_window == NULL) {
+        fprintf(stderr, "Failed to create main window\n");
+        SDL_Quit();
+        exit(1);
+    }
+
+    m_context = SDL_GL_CreateContext(m_window);
+    if (m_context == NULL) {
+        fprintf(stderr, "%s: Failed to create GL context\n", __func__);
+        SDL_DestroyWindow(m_window);
+        SDL_Quit();
+        exit(1);
+    }
+}
+
 void sdl2_window_create(struct sdl2_console *scon)
 {
     int flags = 0;
@@ -84,11 +150,15 @@ void sdl2_window_create(struct sdl2_console *scon)
         flags |= SDL_WINDOW_HIDDEN;
     }
 
+#if 0
     scon->real_window = SDL_CreateWindow("", SDL_WINDOWPOS_UNDEFINED,
                                          SDL_WINDOWPOS_UNDEFINED,
                                          surface_width(scon->surface),
                                          surface_height(scon->surface),
                                          flags);
+#else
+    scon->real_window = m_window;
+#endif
     scon->real_renderer = SDL_CreateRenderer(scon->real_window, -1, 0);
     if (scon->opengl) {
         scon->winctx = SDL_GL_GetCurrentContext();
@@ -135,7 +205,7 @@ static void sdl_update_caption(struct sdl2_console *scon)
     char win_title[1024];
     char icon_title[1024];
     const char *status = "";
-    const char *project_name = "XQEMU";
+    const char *project_name = "XQEMU [EXPERIMENTAL PERFORMANCE WIP]";
     const char *hash_indicator = "Revision";
 
     if (!runstate_is_running()) {
@@ -764,6 +834,8 @@ static void sdl2_display_early_init(DisplayOptions *o)
         display_opengl = 1;
 #endif
     }
+
+    sdl2_early_window_create();
 }
 
 static void sdl2_display_init(DisplayState *ds, DisplayOptions *o)
@@ -776,6 +848,7 @@ static void sdl2_display_init(DisplayState *ds, DisplayOptions *o)
 
     assert(o->type == DISPLAY_TYPE_SDL);
 
+#if 0
 #ifdef __linux__
     /* on Linux, SDL may use fbcon|directfb|svgalib when run without
      * accessible $DISPLAY to open X11 window.  This is often the case
@@ -796,6 +869,7 @@ static void sdl2_display_init(DisplayState *ds, DisplayOptions *o)
         exit(1);
     }
     SDL_SetHint(SDL_HINT_GRAB_KEYBOARD, "1");
+#endif
     memset(&info, 0, sizeof(info));
     SDL_VERSION(&info.version);
 
@@ -806,6 +880,10 @@ static void sdl2_display_init(DisplayState *ds, DisplayOptions *o)
         }
     }
     sdl2_num_outputs = i;
+#ifdef XBOX
+    /* Let's just keep one window */
+    sdl2_num_outputs = 1;
+#endif
     if (sdl2_num_outputs == 0) {
         return;
     }

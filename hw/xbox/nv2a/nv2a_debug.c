@@ -49,7 +49,7 @@ void gl_debug_initialize(void)
          */
 #else
        glEnable(GL_DEBUG_OUTPUT);
-       assert(glGetError() == GL_NO_ERROR);
+       // assert(glGetError() == GL_NO_ERROR);
 #endif
     }
 }
@@ -71,8 +71,8 @@ void gl_debug_message(bool cc, const char *fmt, ...)
     glDebugMessageInsert(GL_DEBUG_SOURCE_APPLICATION, GL_DEBUG_TYPE_MARKER,
                          0, GL_DEBUG_SEVERITY_NOTIFICATION, n, buffer);
     if (cc) {
-        fwrite(buffer, sizeof(char), n, stdout);
-        fputc('\n', stdout);
+        // fwrite(buffer, sizeof(char), n, stdout);
+        // fputc('\n', stdout);
     }
 }
 
@@ -92,13 +92,13 @@ void gl_debug_group_begin(const char *fmt, ...)
     }
 
     /* Check for errors before starting real commands in group */
-    assert(glGetError() == GL_NO_ERROR);
+    // assert(glGetError() == GL_NO_ERROR);
 }
 
 void gl_debug_group_end(void)
 {
     /* Check for errors when leaving group */
-    assert(glGetError() == GL_NO_ERROR);
+    // assert(glGetError() == GL_NO_ERROR);
 
     /* Debug group end */
     if (has_GL_KHR_debug) {

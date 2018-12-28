@@ -38,7 +38,10 @@
 #include "hw/xbox/nv2a/nv2a_debug.h"
 #include "hw/xbox/nv2a/nv2a_regs.h"
 
-#define USE_TEXTURE_CACHE 1
+#include "perf_config.h"
+
+#define CRPRINTF(...)
+
 
 #define GET_MASK(v, mask) (((v) & (mask)) >> ctz32(mask))
 
@@ -135,6 +138,7 @@ typedef struct TextureShape {
 typedef struct TextureBinding {
     GLenum gl_target;
     GLuint gl_texture;
+    unsigned int scale;
     unsigned int refcnt;
 } TextureBinding;
 
@@ -145,6 +149,22 @@ typedef struct TextureKey {
     uint8_t *palette_data;
     TextureBinding *binding;
 } TextureKey;
+
+typedef struct GeometryKey {
+    struct lru_node node;
+    GLenum buffer_type;
+    size_t buffer_length;
+    int    populated;
+    GLuint buffer_id;
+} GeometryKey;
+
+typedef struct UboCacheKey {
+    struct lru_node node;
+    GLenum buffer_type;
+    size_t buffer_length;
+    int    populated;
+    GLuint buffer_id;
+} UboCacheKey;
 
 typedef struct KelvinState {
     hwaddr object_instance;
@@ -169,7 +189,11 @@ typedef struct ImageBlitState {
 } ImageBlitState;
 
 typedef struct PGRAPHState {
+#if USE_COROUTINES
+    QemuSpin lock;
+#else
     QemuMutex lock;
+#endif
 
     uint32_t pending_interrupts;
     uint32_t enabled_interrupts;
@@ -195,6 +219,20 @@ typedef struct PGRAPHState {
     bool texture_dirty[NV2A_MAX_TEXTURES];
     TextureBinding *texture_binding[NV2A_MAX_TEXTURES];
 
+
+    struct lru inline_array_cache;
+    struct GeometryKey *inline_array_cache_entries;
+
+    struct lru inline_element_cache;
+    struct GeometryKey *inline_element_cache_entries;
+
+    struct lru inline_attribute_buffer_cache;
+    struct GeometryKey *inline_attribute_buffer_cache_entries;
+
+    struct lru converted_buffer_cache;
+    struct GeometryKey *converted_buffer_cache_entries;
+
+
     GHashTable *shader_cache;
     ShaderBinding *shader_binding;
 
@@ -206,6 +244,9 @@ typedef struct PGRAPHState {
     GloContext *gl_context;
     GLuint gl_framebuffer;
     GLuint gl_color_buffer, gl_zeta_buffer;
+
+    hwaddr gl_color_buffer_offset;
+    hwaddr gl_zeta_buffer_offset;
 
     hwaddr dma_state;
     hwaddr dma_notifies;
@@ -264,7 +305,23 @@ typedef struct PGRAPHState {
     GLuint gl_memory_buffer;
     GLuint gl_vertex_array;
 
+#if USE_UBO
+    GLuint gl_ubo_constants;
+    struct lru ubo_cache;
+    struct UboCacheKey *ubo_cache_entries;
+#endif
+
     uint32_t regs[0x2000];
+
+#if RENDER_TO_TEXTURE
+    struct r2t {
+        GLuint copyFb;
+        GLuint m_vao, m_vbo;
+        GLuint m_vert_shader;
+        GLuint m_frag_shader;
+        GLuint m_shader_prog;
+    } r2t;
+#endif
 } PGRAPHState;
 
 typedef struct NV2AState {
@@ -294,7 +351,11 @@ typedef struct NV2AState {
         uint32_t pending_interrupts;
         uint32_t enabled_interrupts;
         uint32_t regs[0x2000];
+#if USE_COROUTINES
+        QemuSpin lock;
+#else
         QemuMutex lock;
+#endif
         QemuThread puller_thread;
         QemuCond puller_cond;
         QemuThread pusher_thread;

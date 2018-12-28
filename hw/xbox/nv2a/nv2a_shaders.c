@@ -24,6 +24,8 @@
 #include "nv2a_shaders_common.h"
 #include "nv2a_shaders.h"
 
+#define USE_UBO 0
+
 void qstring_append_fmt(QString *qstring, const char *fmt, ...)
 {
     va_list ap;
@@ -634,7 +636,13 @@ static QString *generate_vertex_shader(const ShaderState state,
 "uniform vec2 surfaceSize;\n"
 "\n"
 /* All constants in 1 array declaration */
+#if USE_UBO
+"layout (std140) uniform constants {\n"
+"    vec4 c[" stringify(NV2A_VERTEXSHADER_CONSTANTS) "];\n"
+"};\n"
+#else
 "uniform vec4 c[" stringify(NV2A_VERTEXSHADER_CONSTANTS) "];\n"
+#endif
 "\n"
 "uniform vec4 fogColor;\n"
 "uniform float fogParam[2];\n"
@@ -933,6 +941,12 @@ ShaderBinding* generate_shaders(const ShaderState state)
     ret->gl_program = program;
     ret->gl_primitive_mode = gl_primitive_mode;
 
+    /* lookup texture scale uniforms */
+    for (i = 0; i < NV2A_MAX_TEXTURES; i++) {
+        snprintf(tmp, sizeof(tmp), "texScale%d", i);
+        ret->tex_scale_loc[i] = glGetUniformLocation(program, tmp);
+    }
+
     /* lookup fragment shader uniforms */
     for (i = 0; i < 9; i++) {
         for (j = 0; j < 2; j++) {
@@ -989,6 +1003,13 @@ ShaderBinding* generate_shaders(const ShaderState state)
         snprintf(tmp, sizeof(tmp), "clipRegion[%d]", i);
         ret->clip_region_loc[i] = glGetUniformLocation(program, tmp);
     }
+
+#if USE_UBO
+    ret->constants_loc = glGetUniformBlockIndex(program, "constants");
+    glUniformBlockBinding(program, ret->constants_loc, 0);
+#endif
+    
+    // memcpy(&ret->state, &state, sizeof(state));
 
     return ret;
 }

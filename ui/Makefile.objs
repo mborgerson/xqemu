@@ -23,7 +23,8 @@ endif
 ifeq ($(CONFIG_SDLABI),2.0)
 sdl.mo-objs := sdl2.o sdl2-input.o sdl2-2d.o
 ifeq ($(CONFIG_OPENGL),y)
-sdl.mo-objs += sdl2-gl.o
+# sdl.mo-objs += sdl2-gl.o
+sdl.mo-objs += sdl2-xbox.o
 endif
 endif
 sdl.mo-cflags := $(SDL_CFLAGS)
@@ -56,12 +57,12 @@ curses.mo-libs := $(CURSES_LIBS)
 
 common-obj-$(CONFIG_OPENGL) += shader.o
 common-obj-$(CONFIG_OPENGL) += console-gl.o
-common-obj-$(CONFIG_OPENGL) += egl-helpers.o
-common-obj-$(CONFIG_OPENGL) += egl-context.o
-common-obj-$(CONFIG_OPENGL_DMABUF) += egl-headless.o
+# common-obj-$(CONFIG_OPENGL) += egl-helpers.o
+# common-obj-$(CONFIG_OPENGL) += egl-context.o
+# common-obj-$(CONFIG_OPENGL_DMABUF) += egl-headless.o
 
-shader.o-libs += $(OPENGL_LIBS)
+# shader.o-libs += $(OPENGL_LIBS)
 console-gl.o-libs += $(OPENGL_LIBS)
-egl-helpers.o-libs += $(OPENGL_LIBS)
-egl-context.o-libs += $(OPENGL_LIBS)
-egl-headless.o-libs += $(OPENGL_LIBS)
+# egl-helpers.o-libs += $(OPENGL_LIBS)
+# egl-context.o-libs += $(OPENGL_LIBS)
+# egl-headless.o-libs += $(OPENGL_LIBS)

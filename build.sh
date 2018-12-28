@@ -52,7 +52,7 @@ case "$(uname -s)" in # adjust compilation option based on platform
     CYGWIN*|MINGW*|MSYS*)
         echo 'Compiling for Windows…'
         sys_cflags='-Wno-error'
-        sys_opts='--python=python2 --disable-cocoa --disable-opengl'
+        sys_opts='--python=python2 --disable-cocoa'
         postbuild='package_windows' # set the above function to be called after build
         ;;
     *)
@@ -87,6 +87,7 @@ set -x # Print commands from now on
     --disable-spice \
     --disable-user \
     --disable-stack-protector \
+    --enable-opengl \
     ${user_opts}
 
 time make -j"${job_count}" 2>&1 | tee build.log

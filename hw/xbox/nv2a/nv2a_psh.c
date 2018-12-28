@@ -38,6 +38,8 @@
 #include "nv2a_shaders_common.h"
 #include "nv2a_psh.h"
 
+#include "perf_config.h"
+
 /*
  * This implements translation of register combiners into glsl
  * fragment shaders, but all terminology is in terms of Xbox DirectX
@@ -385,9 +387,13 @@ static void add_stage_code(struct PixelShader *ps,
                            struct InputVarInfo input, struct OutputInfo output,
                            const char *write_mask, bool is_alpha)
 {
+    qstring_append_fmt(ps->code, "// Getting input a (is_alpha=%d), chan=%d\n", is_alpha, input.a.chan);
     QString *a = get_input_var(ps, input.a, is_alpha);
+    qstring_append_fmt(ps->code, "// Getting input b (is_alpha=%d), chan=%d\n", is_alpha, input.b.chan);
     QString *b = get_input_var(ps, input.b, is_alpha);
+    qstring_append_fmt(ps->code, "// Getting input c (is_alpha=%d), chan=%d\n", is_alpha, input.c.chan);
     QString *c = get_input_var(ps, input.c, is_alpha);
+    qstring_append_fmt(ps->code, "// Getting input d (is_alpha=%d), chan=%d\n", is_alpha, input.d.chan);
     QString *d = get_input_var(ps, input.d, is_alpha);
 
     const char *caster = "";
@@ -437,6 +443,8 @@ static void add_stage_code(struct PixelShader *ps,
         cd_dest = cd_mapping;
     }
 
+    // qstring_append_fmt(ps->code, )
+
     if (!is_alpha && output.flags & PS_COMBINEROUTPUT_AB_BLUE_TO_ALPHA) {
         qstring_append_fmt(ps->code, "%s.a = %s.b;\n",
                            qstring_get_str(ab_dest), qstring_get_str(ab_dest));
@@ -450,8 +458,8 @@ static void add_stage_code(struct PixelShader *ps,
     if (output.muxsum_op == PS_COMBINEROUTPUT_AB_CD_SUM) {
         sum = qstring_from_fmt("(%s + %s)", qstring_get_str(ab), qstring_get_str(cd));
     } else {
-        sum = qstring_from_fmt("((r0.a >= 0.5) ? %s : %s)",
-                               qstring_get_str(cd), qstring_get_str(ab));
+        sum = qstring_from_fmt("((r0.a >= 0.5) ? %s(%s) : %s(%s))",
+                               caster, qstring_get_str(cd), caster, qstring_get_str(ab));
     }
 
     QString *sum_mapping = get_output(sum, output.mapping);
@@ -478,6 +486,9 @@ static void add_stage_code(struct PixelShader *ps,
 // Add code for the final combiner stage
 static void add_final_stage_code(struct PixelShader *ps, struct FCInputInfo final)
 {
+
+    qstring_append_fmt(ps->code, "// final stage: %08x %08x\n", ps->state.final_inputs_0, ps->state.final_inputs_1);
+
     ps->varE = get_input_var(ps, final.e, false);
     ps->varF = get_input_var(ps, final.f, false);
 
@@ -485,7 +496,7 @@ static void add_final_stage_code(struct PixelShader *ps, struct FCInputInfo fina
     QString *b = get_input_var(ps, final.b, false);
     QString *c = get_input_var(ps, final.c, false);
     QString *d = get_input_var(ps, final.d, false);
-    QString *g = get_input_var(ps, final.g, false);
+    QString *g = get_input_var(ps, final.g, true);
 
     qstring_append_fmt(ps->code, "fragColor.rgb = %s + mix(vec3(%s), vec3(%s), vec3(%s));\n",
                        qstring_get_str(d), qstring_get_str(c),
@@ -587,11 +598,13 @@ static QString* psh_convert(struct PixelShader *ps)
             } else {
                 sampler_type = "sampler2D";
             }
+            qstring_append_fmt(vars, "pT%d.xy = texScale%d * pT%d.xy;\n", i, i, i);
             qstring_append_fmt(vars, "vec4 t%d = textureProj(texSamp%d, pT%d.xyw);\n",
                                i, i, i);
             break;
         case PS_TEXTUREMODES_PROJECT3D:
             sampler_type = "sampler3D";
+            qstring_append_fmt(vars, "pT%d.xyz = texScale%d * pT%d.xyz;\n", i, i, i);
             qstring_append_fmt(vars, "vec4 t%d = textureProj(texSamp%d, pT%d.xyzw);\n",
                                i, i, i);
             break;
@@ -644,7 +657,7 @@ static QString* psh_convert(struct PixelShader *ps)
         case PS_TEXTUREMODES_DOT_ST:
             qstring_append_fmt(vars, "vec4 t%d = vec4(0.0); /* PS_TEXTUREMODES_DOT_ST */\n",
                                i);
-            assert(false); /* Unimplemented */
+            // assert(false); /* Unimplemented */
             break;
         case PS_TEXTUREMODES_DOT_ZW:
             qstring_append_fmt(vars, "vec4 t%d = vec4(0.0); /* PS_TEXTUREMODES_DOT_ZW */\n",
@@ -699,6 +712,7 @@ static QString* psh_convert(struct PixelShader *ps)
         }
         
         if (sampler_type != NULL) {
+            qstring_append_fmt(preflight, "uniform float texScale%d;\n", i);
             qstring_append_fmt(preflight, "uniform %s texSamp%d;\n", sampler_type, i);
 
             /* As this means a texture fetch does happen, do alphakill */

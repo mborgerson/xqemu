@@ -27,7 +27,9 @@ uint64_t user_read(void *opaque, hwaddr addr, unsigned int size)
     unsigned int channel_id = addr >> 16;
     assert(channel_id < NV2A_NUM_CHANNELS);
 
+#if !USE_COROUTINES
     qemu_mutex_lock(&d->pfifo.lock);
+#endif
 
     uint32_t channel_modes = d->pfifo.regs[NV_PFIFO_MODE];
 
@@ -62,7 +64,9 @@ uint64_t user_read(void *opaque, hwaddr addr, unsigned int size)
         assert(false);
     }
 
+#if !USE_COROUTINES
     qemu_mutex_unlock(&d->pfifo.lock);
+#endif
 
     reg_log_read(NV_USER, addr, r);
     return r;
@@ -77,7 +81,9 @@ void user_write(void *opaque, hwaddr addr, uint64_t val, unsigned int size)
     unsigned int channel_id = addr >> 16;
     assert(channel_id < NV2A_NUM_CHANNELS);
 
+#if !USE_COROUTINES
     qemu_mutex_lock(&d->pfifo.lock);
+#endif
 
     uint32_t channel_modes = d->pfifo.regs[NV_PFIFO_MODE];
     if (channel_modes & (1 << channel_id)) {
@@ -103,9 +109,16 @@ void user_write(void *opaque, hwaddr addr, uint64_t val, unsigned int size)
             }
 
             // kick pfifo
+
+#if USE_COROUTINES
+            qemu_spin_lock(&d->pfifo.lock);
+            pusher_cond = 1;
+            puller_cond = 1;
+            qemu_spin_unlock(&d->pfifo.lock);
+#else
             qemu_cond_broadcast(&d->pfifo.pusher_cond);
             qemu_cond_broadcast(&d->pfifo.puller_cond);
-
+#endif
         } else {
             /* ramfc */
             assert(false);
@@ -115,6 +128,7 @@ void user_write(void *opaque, hwaddr addr, uint64_t val, unsigned int size)
         assert(false);
     }
 
+#if !USE_COROUTINES
     qemu_mutex_unlock(&d->pfifo.lock);
-
+#endif
 }

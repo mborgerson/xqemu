@@ -42,6 +42,8 @@ uint64_t pcrtc_read(void *opaque, hwaddr addr, unsigned int size)
     return r;
 }
 
+hwaddr crtc_start_last[3];
+
 void pcrtc_write(void *opaque, hwaddr addr, uint64_t val, unsigned int size)
 {
     NV2AState *d = (NV2AState *)opaque;
@@ -59,9 +61,16 @@ void pcrtc_write(void *opaque, hwaddr addr, uint64_t val, unsigned int size)
         break;
     case NV_PCRTC_START:
         val &= 0x07FFFFFF;
+
+        // Debug swap chain
+        crtc_start_last[2] = crtc_start_last[1];
+        crtc_start_last[1] = crtc_start_last[0];
+        crtc_start_last[0] = d->pcrtc.start;
+
         // assert(val < memory_region_size(d->vram));
         d->pcrtc.start = val;
 
+        // printf("PCRTC_START = %" HWADDR_PRIx "\n", val);
         NV2A_DPRINTF("PCRTC_START - %x %x %x %x\n",
                 d->vram_ptr[val+64], d->vram_ptr[val+64+1],
                 d->vram_ptr[val+64+2], d->vram_ptr[val+64+3]);

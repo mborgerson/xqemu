@@ -40,7 +40,6 @@
 
 #include "hw/xbox/nv2a/nv2a.h"
 
-
 #define DEFINE_PROTO(n)                                              \
     uint64_t n##_read(void *opaque, hwaddr addr, unsigned int size); \
     void n##_write(void *opaque, hwaddr addr, uint64_t val, unsigned int size);
@@ -392,6 +391,12 @@ static void nv2a_init_memory(NV2AState *d, MemoryRegion *ram)
 
     pgraph_init(d);
 
+#if USE_COROUTINES
+    /* fire up fifo */
+    qemu_thread_create(&d->pfifo.pusher_thread, "nv2a.fifo_pgraph_thread",
+                       render_thread,
+                       d, QEMU_THREAD_JOINABLE);
+#else
     /* fire up puller */
     qemu_thread_create(&d->pfifo.puller_thread, "nv2a.puller_thread",
                        pfifo_puller_thread,
@@ -401,6 +406,7 @@ static void nv2a_init_memory(NV2AState *d, MemoryRegion *ram)
     qemu_thread_create(&d->pfifo.pusher_thread, "nv2a.pusher_thread",
                        pfifo_pusher_thread,
                        d, QEMU_THREAD_JOINABLE);
+#endif
 }
 
 static void nv2a_realize(PCIDevice *dev, Error **errp)
@@ -449,7 +455,11 @@ static void nv2a_realize(PCIDevice *dev, Error **errp)
                                     &d->block_mmio[i]);
     }
 
+#if USE_COROUTINES
+    qemu_spin_init(&d->pfifo.lock);
+#else
     qemu_mutex_init(&d->pfifo.lock);
+#endif
     qemu_cond_init(&d->pfifo.puller_cond);
     qemu_cond_init(&d->pfifo.pusher_cond);
 

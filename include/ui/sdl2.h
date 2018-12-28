@@ -7,8 +7,12 @@
 #include <SDL.h>
 #include <SDL_syswm.h>
 
+#ifndef XBOX
+
 #ifdef CONFIG_OPENGL
 # include "ui/egl-helpers.h"
+#endif
+
 #endif
 
 struct sdl2_console {
@@ -28,9 +32,11 @@ struct sdl2_console {
     int ignore_hotkeys;
     SDL_GLContext winctx;
 #ifdef CONFIG_OPENGL
+#ifndef XBOX
     QemuGLShader *gls;
     egl_fb guest_fb;
     egl_fb win_fb;
+#endif
     bool y0_top;
     bool scanout_mode;
 #endif

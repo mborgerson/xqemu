@@ -19,6 +19,10 @@
  * License along with this library; if not, see <http://www.gnu.org/licenses/>.
  */
 
+volatile int puller_cond;
+volatile int pusher_cond;
+volatile int fifo_access_cond;
+
 typedef struct RAMHTEntry {
     uint32_t handle;
     hwaddr instance;
@@ -36,7 +40,9 @@ uint64_t pfifo_read(void *opaque, hwaddr addr, unsigned int size)
 {
     NV2AState *d = (NV2AState *)opaque;
 
+#if !USE_COROUTINES
     qemu_mutex_lock(&d->pfifo.lock);
+#endif
 
     uint64_t r = 0;
     switch (addr) {
@@ -54,7 +60,9 @@ uint64_t pfifo_read(void *opaque, hwaddr addr, unsigned int size)
         break;
     }
 
+#if !USE_COROUTINES
     qemu_mutex_unlock(&d->pfifo.lock);
+#endif
 
     reg_log_read(NV_PFIFO, addr, r);
     return r;
@@ -66,15 +74,19 @@ void pfifo_write(void *opaque, hwaddr addr, uint64_t val, unsigned int size)
 
     reg_log_write(NV_PFIFO, addr, val);
 
+#if !USE_COROUTINES
     qemu_mutex_lock(&d->pfifo.lock);
+#endif
 
     switch (addr) {
     case NV_PFIFO_INTR_0:
         d->pfifo.pending_interrupts &= ~val;
+        CRPRINTF("updating irq %s\n", __func__);
         update_irq(d);
         break;
     case NV_PFIFO_INTR_EN_0:
         d->pfifo.enabled_interrupts = val;
+        CRPRINTF("updating irq %s\n", __func__);
         update_irq(d);
         break;
     default:
@@ -82,10 +94,20 @@ void pfifo_write(void *opaque, hwaddr addr, uint64_t val, unsigned int size)
         break;
     }
 
+#if USE_COROUTINES
+    CRPRINTF("Signaling pusher and puller!\n");
+    qemu_spin_lock(&d->pfifo.lock);
+    pusher_cond = 1;
+    puller_cond = 1;
+    qemu_spin_unlock(&d->pfifo.lock);
+#else
     qemu_cond_broadcast(&d->pfifo.pusher_cond);
     qemu_cond_broadcast(&d->pfifo.puller_cond);
+#endif
 
+#if !USE_COROUTINES
     qemu_mutex_unlock(&d->pfifo.lock);
+#endif
 }
 
 static void pfifo_run_puller(NV2AState *d)
@@ -129,7 +151,13 @@ static void pfifo_run_puller(NV2AState *d)
             // unset high mark
             *status &= ~NV_PFIFO_CACHE1_STATUS_HIGH_MARK;
             // signal pusher
-            qemu_cond_signal(&d->pfifo.pusher_cond);            
+#if USE_COROUTINES
+            CRPRINTF("puller is signaling pusher!\n");
+            pusher_cond = 1;
+            qemu_coroutine_yield();
+#else
+            qemu_cond_signal(&d->pfifo.pusher_cond);
+#endif
         }
 
 
@@ -153,20 +181,23 @@ static void pfifo_run_puller(NV2AState *d)
             SET_MASK(*pull1, NV_PFIFO_CACHE1_PULL1_ENGINE, entry.engine);
             // NV2A_DPRINTF("engine_reg1 %d 0x%x\n", subchannel, *engine_reg);
 
-
+#if !USE_COROUTINES
             // TODO: this is fucked
             qemu_mutex_lock(&d->pgraph.lock);
             //make pgraph busy
             qemu_mutex_unlock(&d->pfifo.lock);
+#endif
 
             pgraph_context_switch(d, entry.channel_id);
             pgraph_wait_fifo_access(d);
+
             pgraph_method(d, subchannel, 0, entry.instance);
 
+#if !USE_COROUTINES
             // make pgraph not busy
             qemu_mutex_unlock(&d->pgraph.lock);
             qemu_mutex_lock(&d->pfifo.lock);
-
+#endif
         } else if (method >= 0x100) {
             // method passed to engine
 
@@ -186,17 +217,22 @@ static void pfifo_run_puller(NV2AState *d)
             assert(engine == ENGINE_GRAPHICS);
             SET_MASK(*pull1, NV_PFIFO_CACHE1_PULL1_ENGINE, engine);
 
+#if !USE_COROUTINES
             // TODO: this is fucked
             qemu_mutex_lock(&d->pgraph.lock);
             //make pgraph busy
             qemu_mutex_unlock(&d->pfifo.lock);
+#endif
 
             pgraph_wait_fifo_access(d);
+            CRPRINTF("running method\n");
             pgraph_method(d, subchannel, method, parameter);
 
+#if !USE_COROUTINES
             // make pgraph not busy
             qemu_mutex_unlock(&d->pgraph.lock);
             qemu_mutex_lock(&d->pfifo.lock);
+#endif
         } else {
             assert(false);
         }
@@ -204,24 +240,55 @@ static void pfifo_run_puller(NV2AState *d)
     }
 }
 
-static void* pfifo_puller_thread(void *arg)
+#if USE_COROUTINES
+static void coroutine_fn pfifo_puller_thread(void *arg)
+#else
+static void *pfifo_puller_thread(void *arg)
+#endif
 {
     NV2AState *d = (NV2AState *)arg;
 
     glo_set_current(d->pgraph.gl_context);
 
+#if !USE_COROUTINES
     qemu_mutex_lock(&d->pfifo.lock);
+#endif
+
     while (true) {
+#if USE_COROUTINES
+        CRPRINTF("running puller!\n");
+        pfifo_run_puller(d);
+        // while (!puller_cond && !d->exiting) {
+        while (1) {
+            int should_break = 0;
+
+            qemu_spin_lock(&d->pfifo.lock);
+            if (puller_cond) {
+                should_break = 1;
+                puller_cond = 0;
+            }
+            qemu_spin_unlock(&d->pfifo.lock);
+
+            if (should_break) {
+                CRPRINTF("puller got signal\n");
+                break;
+            } else {
+                // CRPRINTF("puller is waiting!\n");
+                qemu_coroutine_yield();
+            }
+        }
+#else
         pfifo_run_puller(d);
         qemu_cond_wait(&d->pfifo.puller_cond, &d->pfifo.lock);
-
+#endif
         if (d->exiting) {
             break;
         }
     }
+#if !USE_COROUTINES
     qemu_mutex_unlock(&d->pfifo.lock);
-
     return NULL;
+#endif
 }
 
 static void pfifo_run_pusher(NV2AState *d)
@@ -329,7 +396,13 @@ static void pfifo_run_pusher(NV2AState *d)
                 // unset low mark
                 *status &= ~NV_PFIFO_CACHE1_STATUS_LOW_MARK;
                 // signal puller
+#if USE_COROUTINES
+                CRPRINTF("pusher signaling puller!\n");
+                puller_cond = 1;
+                qemu_coroutine_yield();
+#else
                 qemu_cond_signal(&d->pfifo.puller_cond);
+#endif
             }
 
             if (method_type == NV_PFIFO_CACHE1_DMA_STATE_METHOD_TYPE_INC) {
@@ -435,23 +508,77 @@ static void pfifo_run_pusher(NV2AState *d)
     }
 }
 
-static void* pfifo_pusher_thread(void *arg)
+#if USE_COROUTINES
+static void coroutine_fn pfifo_pusher_thread(void *arg)
+#else
+static void *pfifo_pusher_thread(void *arg)
+#endif
 {
     NV2AState *d = (NV2AState *)arg;
 
+#if !USE_COROUTINES
     qemu_mutex_lock(&d->pfifo.lock);
+#endif
     while (true) {
+#if USE_COROUTINES
+        CRPRINTF("running pusher!\n");
+        pfifo_run_pusher(d);
+        while (1) {
+            int should_break = 0;
+
+            qemu_spin_lock(&d->pfifo.lock);
+            if (pusher_cond) {
+                should_break = 1;
+                pusher_cond = 0;
+            }
+            qemu_spin_unlock(&d->pfifo.lock);
+
+            if (should_break) {
+                CRPRINTF("pusher got signal\n");
+                break;
+            } else {
+                // CRPRINTF("pusher is waiting!\n");
+                qemu_coroutine_yield();
+            }
+        }
+#else
         pfifo_run_pusher(d);
         qemu_cond_wait(&d->pfifo.pusher_cond, &d->pfifo.lock);
-
+#endif
         if (d->exiting) {
             break;
         }
     }
+#if !USE_COROUTINES
     qemu_mutex_unlock(&d->pfifo.lock);
+    return NULL;
+#endif
+}
 
+#if USE_COROUTINES
+static void* render_thread(void *arg)
+{
+    NV2AState *d = (NV2AState *)arg;
+
+    Coroutine *puller, *pusher;
+
+    pusher = qemu_coroutine_create(pfifo_pusher_thread, d);
+    puller = qemu_coroutine_create(pfifo_puller_thread, d);
+
+    // qemu_mutex_lock(&d->pfifo.lock);
+    while (!d->exiting) {
+        // CRPRINTF("LOOP %d\n", i++);
+        // qemu_mutex_lock_iothread();
+        qemu_coroutine_enter(pusher);
+        qemu_coroutine_enter(puller);
+        // qemu_mutex_unlock_iothread();
+        // qemu_cond_wait(&d->pfifo.pusher_cond, &d->pfifo.lock);
+    }
+
+    // qemu_mutex_unlock(&d->pfifo.lock);
     return NULL;
 }
+#endif
 
 static uint32_t ramht_hash(NV2AState *d, uint32_t handle)
 {
