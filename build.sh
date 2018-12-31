@@ -42,7 +42,7 @@ case "$(uname -s)" in # adjust compilation option based on platform
     Linux)
         echo 'Compiling for Linux…'
         sys_cflags='-march=native -Wno-error=redundant-decls -Wno-error=unused-but-set-variable'
-        sys_opts='--enable-kvm --disable-xen --disable-werror'
+        sys_opts='--enable-kvm --disable-xen --disable-werror --disable-gtk'
         ;;
     Darwin)
         echo 'Compiling for MacOS…'
