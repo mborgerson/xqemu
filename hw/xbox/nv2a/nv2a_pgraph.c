@@ -3080,8 +3080,6 @@ static void pgraph_render_surface_to_texture(
     GLboolean m_cull;
     GLboolean m_depth_test;
 
-    // fixme: pipeline
-
     glGetIntegerv(GL_VIEWPORT, m_viewport);
     glGetBooleanv(GL_COLOR_WRITEMASK, m_color_mask);
     m_scissor_test = glIsEnabled(GL_SCISSOR_TEST);
@@ -3142,7 +3140,13 @@ static void pgraph_render_surface_to_texture(
         glBindTexture(d->pgraph.texture_binding[0]->gl_target,
                       d->pgraph.texture_binding[0]->gl_texture);
     }
+#if 0
     glUseProgram(d->pgraph.shader_binding->gl_program);
+#else
+    glUseProgram(0); // FIXME: glUseProgram overrides pipeline so we can just turn it
+                     // off here and the pipeline will supersede it again, but really
+                     // should just rewrite this to use a separate pipeline
+#endif
     // array buffers should be bound after this so no need to bind them here
 
     glViewport(m_viewport[0], m_viewport[1], m_viewport[2], m_viewport[3]);
