@@ -102,7 +102,8 @@ int surface_cache_store(hwaddr addr)
 
     if (i < 0) {
         // Find a free slot
-        for (int j = 0; j < SURFACE_CACHE_SLOTS; j++) {
+        int j;
+        for (j = 0; j < SURFACE_CACHE_SLOTS; j++) {
             if (!surface_cache[j].valid) {
                 i = j;
                 break;
