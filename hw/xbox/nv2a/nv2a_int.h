@@ -313,6 +313,8 @@ typedef struct PGRAPHState {
 
     uint32_t regs[0x2000];
 
+    GLuint pipe;
+
 #if RENDER_TO_TEXTURE
     struct r2t {
         GLuint copyFb;

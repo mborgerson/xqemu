@@ -3080,6 +3080,8 @@ static void pgraph_render_surface_to_texture(
     GLboolean m_cull;
     GLboolean m_depth_test;
 
+    // fixme: pipeline
+
     glGetIntegerv(GL_VIEWPORT, m_viewport);
     glGetBooleanv(GL_COLOR_WRITEMASK, m_color_mask);
     m_scissor_test = glIsEnabled(GL_SCISSOR_TEST);
@@ -3315,6 +3317,10 @@ static void pgraph_init(NV2AState *d)
     pgraph_setup_surface_to_texture(d);
 #endif
 
+    pg->pipe = 0;
+    glGenProgramPipelines(1, &pg->pipe);
+    glBindProgramPipeline(pg->pipe);
+
     glo_set_current(NULL);
 }
 
@@ -3377,14 +3383,14 @@ static void pgraph_shader_update_constants(PGRAPHState *pg,
                 value[2] = (float) (constant[j] & 0xFF) / 255.0f;
                 value[3] = (float) ((constant[j] >> 24) & 0xFF) / 255.0f;
 
-                glUniform4fv(loc, 1, value);
+                glProgramUniform4fv(binding->gl_frag_prog, loc, 1, value);
             }
         }
     }
     if (binding->alpha_ref_loc != -1) {
         float alpha_ref = GET_MASK(pg->regs[NV_PGRAPH_CONTROL_0],
                                    NV_PGRAPH_CONTROL_0_ALPHAREF) / 255.0;
-        glUniform1f(binding->alpha_ref_loc, alpha_ref);
+        glProgramUniform1f(binding->gl_frag_prog, binding->alpha_ref_loc, alpha_ref);
     }
 
 
@@ -3397,16 +3403,16 @@ static void pgraph_shader_update_constants(PGRAPHState *pg,
         if (i > 0) {
             loc = binding->bump_mat_loc[i];
             if (loc != -1) {
-                glUniformMatrix2fv(loc, 1, GL_FALSE, pg->bump_env_matrix[i - 1]);
+                glProgramUniformMatrix2fv(binding->gl_frag_prog, loc, 1, GL_FALSE, pg->bump_env_matrix[i - 1]);
             }
             loc = binding->bump_scale_loc[i];
             if (loc != -1) {
-                glUniform1f(loc, *(float*)&pg->regs[
+                glProgramUniform1f(binding->gl_frag_prog, loc, *(float*)&pg->regs[
                                 NV_PGRAPH_BUMPSCALE1 + (i - 1) * 4]);
             }
             loc = binding->bump_offset_loc[i];
             if (loc != -1) {
-                glUniform1f(loc, *(float*)&pg->regs[
+                glProgramUniform1f(binding->gl_frag_prog, loc, *(float*)&pg->regs[
                             NV_PGRAPH_BUMPOFFSET1 + (i - 1) * 4]);
             }
         }
@@ -3415,21 +3421,20 @@ static void pgraph_shader_update_constants(PGRAPHState *pg,
 
     if (binding->fog_color_loc != -1) {
         uint32_t fog_color = pg->regs[NV_PGRAPH_FOGCOLOR];
-        glUniform4f(binding->fog_color_loc,
+        glProgramUniform4f(binding->gl_frag_prog, binding->fog_color_loc,
                     GET_MASK(fog_color, NV_PGRAPH_FOGCOLOR_RED) / 255.0,
                     GET_MASK(fog_color, NV_PGRAPH_FOGCOLOR_GREEN) / 255.0,
                     GET_MASK(fog_color, NV_PGRAPH_FOGCOLOR_BLUE) / 255.0,
                     GET_MASK(fog_color, NV_PGRAPH_FOGCOLOR_ALPHA) / 255.0);
     }
     if (binding->fog_param_loc[0] != -1) {
-        glUniform1f(binding->fog_param_loc[0],
+        glProgramUniform1f(binding->gl_vert_prog, binding->fog_param_loc[0],
                     *(float*)&pg->regs[NV_PGRAPH_FOGPARAM0]);
     }
     if (binding->fog_param_loc[1] != -1) {
-        glUniform1f(binding->fog_param_loc[1],
+        glProgramUniform1f(binding->gl_vert_prog, binding->fog_param_loc[1],
                     *(float*)&pg->regs[NV_PGRAPH_FOGPARAM1]);
     }
-
 
     float zclip_max = *(float*)&pg->regs[NV_PGRAPH_ZCLIPMAX];
     float zclip_min = *(float*)&pg->regs[NV_PGRAPH_ZCLIPMIN];
@@ -3456,7 +3461,7 @@ static void pgraph_shader_update_constants(PGRAPHState *pg,
                 if (!lighting_dirty[j] && !binding_changed) continue;
                 GLint loc = lighting_locs[j];
                 if (loc != -1) {
-                    glUniform4fv(loc, 1, (const GLfloat*)&lighting_v[j*4]);
+                    glProgramUniform4fv(binding->gl_vert_prog, loc, 1, (const GLfloat*)&lighting_v[j*4]);
                 }
                 lighting_dirty[j] = false;
             }
@@ -3467,20 +3472,20 @@ static void pgraph_shader_update_constants(PGRAPHState *pg,
             GLint loc;
             loc = binding->light_infinite_half_vector_loc[i];
             if (loc != -1) {
-                glUniform3fv(loc, 1, pg->light_infinite_half_vector[i]);
+                glProgramUniform3fv(binding->gl_vert_prog, loc, 1, pg->light_infinite_half_vector[i]);
             }
             loc = binding->light_infinite_direction_loc[i];
             if (loc != -1) {
-                glUniform3fv(loc, 1, pg->light_infinite_direction[i]);
+                glProgramUniform3fv(binding->gl_vert_prog, loc, 1, pg->light_infinite_direction[i]);
             }
 
             loc = binding->light_local_position_loc[i];
             if (loc != -1) {
-                glUniform3fv(loc, 1, pg->light_local_position[i]);
+                glProgramUniform3fv(binding->gl_vert_prog, loc, 1, pg->light_local_position[i]);
             }
             loc = binding->light_local_attenuation_loc[i];
             if (loc != -1) {
-                glUniform3fv(loc, 1, pg->light_local_attenuation[i]);
+                glProgramUniform3fv(binding->gl_vert_prog, loc, 1, pg->light_local_attenuation[i]);
             }
         }
 
@@ -3505,7 +3510,7 @@ static void pgraph_shader_update_constants(PGRAPHState *pg,
         };
 
         if (binding->inv_viewport_loc != -1) {
-            glUniformMatrix4fv(binding->inv_viewport_loc,
+            glProgramUniformMatrix4fv(binding->gl_vert_prog, binding->inv_viewport_loc,
                                1, GL_FALSE, &invViewport[0]);
         }
 
@@ -3523,7 +3528,7 @@ static void pgraph_shader_update_constants(PGRAPHState *pg,
         //assert(loc != -1);
         if (loc != -1) {
             // printf("Constant %d dirty, updated!\n", i);
-            glUniform4fv(loc, 1, (const GLfloat*)pg->vsh_constants[i]);
+            glProgramUniform4fv(binding->gl_vert_prog, loc, 1, (const GLfloat*)pg->vsh_constants[i]);
         }
 #endif
         pg->vsh_constants_dirty[i] = false;
@@ -3535,6 +3540,9 @@ static void pgraph_shader_update_constants(PGRAPHState *pg,
 
 
 #if USE_UBO
+
+    FIXME
+
     size_t len = 4*4*NV2A_VERTEXSHADER_CONSTANTS;
     uint64_t ubo_hash = fast_hash((const unsigned char*)pg->vsh_constants, 4*4*NV2A_VERTEXSHADER_CONSTANTS, 0);
 
@@ -3562,12 +3570,12 @@ static void pgraph_shader_update_constants(PGRAPHState *pg,
 
 
     if (binding->surface_size_loc != -1) {
-        glUniform2f(binding->surface_size_loc, pg->surface_shape.clip_width,
+        glProgramUniform2f(binding->gl_vert_prog, binding->surface_size_loc, pg->surface_shape.clip_width,
                     pg->surface_shape.clip_height);
     }
 
     if (binding->clip_range_loc != -1) {
-        glUniform2f(binding->clip_range_loc, zclip_min, zclip_max);
+        glProgramUniform2f(binding->gl_vert_prog, binding->clip_range_loc, zclip_min, zclip_max);
     }
 }
 
@@ -3884,9 +3892,20 @@ static void pgraph_bind_shaders(PGRAPHState *pg)
         DO_COMP( primitive_mode);
     }
 #endif
+    
+    glUseProgram(0);
 
 // if ((old_binding == NULL) || binding_changed) {
-    glUseProgram(pg->shader_binding->gl_program);
+    glBindProgramPipeline(0);
+    glDeleteProgramPipelines(1, &pg->pipe);
+
+
+    glGenProgramPipelines(1, &pg->pipe);
+    glUseProgramStages(pg->pipe, GL_GEOMETRY_SHADER_BIT, pg->shader_binding->gl_geom_prog);
+    glUseProgramStages(pg->pipe, GL_VERTEX_SHADER_BIT,   pg->shader_binding->gl_vert_prog);
+    glUseProgramStages(pg->pipe, GL_FRAGMENT_SHADER_BIT, pg->shader_binding->gl_frag_prog);
+    glValidateProgramPipeline(pg->pipe);
+    glBindProgramPipeline(pg->pipe);
 // }
 
     /* Clipping regions */
@@ -3919,8 +3938,9 @@ static void pgraph_bind_shaders(PGRAPHState *pg)
         y_max *= 2;
 #endif
 
-        glUniform4i(pg->shader_binding->clip_region_loc[i],
-                    x_min, y_min, x_max + 1, y_max + 1);
+        glProgramUniform4i(pg->shader_binding->gl_frag_prog,
+                           pg->shader_binding->clip_region_loc[i],
+                           x_min, y_min, x_max + 1, y_max + 1);
     }
 
     pgraph_shader_update_constants(pg, pg->shader_binding, binding_changed,
@@ -4542,7 +4562,8 @@ static void pgraph_bind_textures(NV2AState *d)
 
         if (!pg->texture_dirty[i] && pg->texture_binding[i]) {
             if (pg->shader_binding->tex_scale_loc[i] != -1) {
-                glUniform1f(pg->shader_binding->tex_scale_loc[i], pg->texture_binding[i]->scale);
+                glProgramUniform1f(pg->shader_binding->gl_frag_prog,
+                                   pg->shader_binding->tex_scale_loc[i], pg->texture_binding[i]->scale);
             }
             glBindTexture(pg->texture_binding[i]->gl_target,
                           pg->texture_binding[i]->gl_texture);
@@ -4775,7 +4796,8 @@ static void pgraph_bind_textures(NV2AState *d)
                    state.width, state.height, state.depth);
 
         if (pg->shader_binding->tex_scale_loc[i] != -1) {
-            glUniform1f(pg->shader_binding->tex_scale_loc[i], binding->scale);
+            glProgramUniform1f(pg->shader_binding->gl_frag_prog,
+                               pg->shader_binding->tex_scale_loc[i], binding->scale);
         }
 
         if (f.linear) {

@@ -80,7 +80,10 @@ typedef struct ShaderState {
 } ShaderState;
 
 typedef struct ShaderBinding {
-    GLuint gl_program;
+    GLuint gl_geom_prog;
+    GLuint gl_vert_prog;
+    GLuint gl_frag_prog;
+
     GLenum gl_primitive_mode;
 
     GLint psh_constant_loc[9][2];

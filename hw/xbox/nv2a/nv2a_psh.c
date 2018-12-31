@@ -523,6 +523,14 @@ static QString* psh_convert(struct PixelShader *ps)
 
     QString *preflight = qstring_new();
     qstring_append(preflight, STRUCT_VERTEX_DATA);
+    qstring_append(preflight,
+"\n"
+// "in gl_PerFragment {\n"
+"    in vec4 gl_FragCoord;\n"
+// "};\n"
+"\n"
+);
+    // qstring_append(preflight, "layout(location = 20) noperspective in VertexData g_vtx;\n");
     qstring_append(preflight, "noperspective in VertexData g_vtx;\n");
     qstring_append(preflight, "#define vtx g_vtx\n");
     qstring_append(preflight, "\n");
@@ -775,6 +783,7 @@ static QString* psh_convert(struct PixelShader *ps)
 
     QString *final = qstring_new();
     qstring_append(final, "#version 330\n\n");
+    qstring_append(final, "#extension GL_ARB_separate_shader_objects : require\n");
     qstring_append(final, qstring_get_str(preflight));
     qstring_append(final, "void main() {\n");
     qstring_append(final, qstring_get_str(clip));
