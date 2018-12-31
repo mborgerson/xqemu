@@ -839,9 +839,19 @@ static void pgraph_method(NV2AState *d,
             fence = 0;
         }
 
+#if 0
+        fence = 0;
+        fb_tex_tmp = pg->gl_color_buffer;
+#endif
+
         if (fence == 0) {
             SDPRINTF("Sync point not found... forcing sync!\n");
             fence = glFenceSync( GL_SYNC_GPU_COMMANDS_COMPLETE, 0 );
+
+            // hmm
+            // if (fb_tex_tmp == 0) {
+            //     fb_tex_tmp = pg->gl_color_buffer;
+            // }
         }
 
         // Make frame available
@@ -2656,7 +2666,7 @@ static void pgraph_method(NV2AState *d,
                 red = ((clear_color >> 10) & 0x1F) / 31.0f;
                 green = ((clear_color >> 5) & 0x1F) / 31.0f;
                 blue = (clear_color & 0x1F) / 31.0f;
-                assert(false); /* Untested */
+                // assert(false); /* Untested */
                 break;
             case NV097_SET_SURFACE_FORMAT_COLOR_LE_R5G6B5:
                 red = ((clear_color >> 11) & 0x1F) / 31.0f;
@@ -3583,6 +3593,8 @@ static void pgraph_shader_update_constants(PGRAPHState *pg,
     }
 }
 
+int shader_bindings;
+
 static void pgraph_bind_shaders(PGRAPHState *pg)
 {
     int i, j;
@@ -3641,6 +3653,10 @@ static void pgraph_bind_shaders(PGRAPHState *pg)
         .polygon_back_mode = (enum ShaderPolygonMode)GET_MASK(pg->regs[NV_PGRAPH_SETUPRASTER],
                                                               NV_PGRAPH_SETUPRASTER_BACKFACEMODE),
     };
+
+    if (!state.psh.alpha_test) {
+        state.psh.alpha_func = 0;
+    }
 
     state.program_length = 0;
     memset(state.program_data, 0, sizeof(state.program_data));
@@ -3741,7 +3757,7 @@ static void pgraph_bind_shaders(PGRAPHState *pg)
         last_y = y;
     }
 
-    for (i = 0; i < 8; i++) {
+    for (i = 0; i < (state.psh.combiner_control & 0xFF); i++) {
         state.psh.rgb_inputs[i] = pg->regs[NV_PGRAPH_COMBINECOLORI0 + i * 4];
         state.psh.rgb_outputs[i] = pg->regs[NV_PGRAPH_COMBINECOLORO0 + i * 4];
         state.psh.alpha_inputs[i] = pg->regs[NV_PGRAPH_COMBINEALPHAI0 + i * 4];
@@ -3789,9 +3805,15 @@ static void pgraph_bind_shaders(PGRAPHState *pg)
         memcpy(cache_state, &state, sizeof(*cache_state));
         g_hash_table_insert(pg->shader_cache, cache_state,
                             (gpointer)pg->shader_binding);
+
+        memcpy(&pg->shader_binding->state, &state, sizeof(ShaderState));
     }
 
     bool binding_changed = (pg->shader_binding != old_binding);
+
+    if (binding_changed) {
+        shader_bindings++;
+    }
 
 #if 0
     if ((old_binding != NULL) && binding_changed) {

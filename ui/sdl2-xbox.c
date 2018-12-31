@@ -58,10 +58,10 @@ extern volatile GLuint fb_tex;
 extern volatile GLsync fb_sync;
 
 // FPS counter
-// static struct timeval tv_last;
-// static int tv_last_valid;
-// static int frames, updates;
-// static int second_elapse(void);
+static struct timeval tv_last;
+static int tv_last_valid;
+static int frames, updates;
+static int second_elapse(void);
 
 #if !USE_SHARED_CONTEXT
 static void xb_surface_gl_create_texture(DisplaySurface *surface);
@@ -127,11 +127,15 @@ static void sdl2_gl_render_surface(struct sdl2_console *scon)
             glDrawArrays(GL_TRIANGLES, 0, 3);
             SDL_GL_SwapWindow(scon->real_window);
 
-#if 0
+#if 1
             if (second_elapse()) {
                 printf("FPS: %d, UPDATES: %d\n", frames, updates);
                 frames = 0;
                 updates = 0;
+
+                extern int shader_bindings;
+                printf("Shader Bindings: %d\n", shader_bindings);
+                shader_bindings = 0;
             }
             frames++;
 #endif
@@ -542,7 +546,7 @@ static void xb_surface_gl_destroy_texture(DisplaySurface *surface)
 //
 // Helper to determine if we should print some stats on a 1 second interval
 //
-#if 0
+#if 1
 static int second_elapse(void)
 {
     struct timeval tv_now, tv_since_last;
