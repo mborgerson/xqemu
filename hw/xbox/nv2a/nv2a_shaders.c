@@ -214,18 +214,27 @@ static QString* generate_geometry_shader(
     assert(layout_out);
     assert(body);
     QString* s = qstring_from_str("#version 330\n"
-"#extension GL_ARB_separate_shader_objects : require\n"
-                                  "\n");
+        "\n"
+        "#extension GL_ARB_separate_shader_objects : require\n"
+        "\n"
+        "in gl_PerVertex\n"
+        "{\n"
+        "    vec4 gl_Position;\n"
+        "    float gl_PointSize;\n"
+        // "    float gl_ClipDistance[];\n"
+        "} gl_in[];\n"
+        "\n"
+        "out gl_PerVertex {\n"
+        "    vec4 gl_Position;\n"
+        "    float gl_PointSize;\n"
+        "};\n"
+        "\n");
     qstring_append(s, layout_in);
     qstring_append(s, layout_out);
     qstring_append(s, "\n"
                       STRUCT_VERTEX_DATA
                       "noperspective in VertexData v_vtx[];\n"
                       "noperspective out VertexData g_vtx;\n"
-"out gl_PerVertex {\n"
-"    vec4 gl_Position;\n"
-"    float gl_PointSize;\n"
-"};\n"
                       "\n"
                       "void emit_vertex(int index) {\n"
                       "  gl_Position = gl_in[index].gl_Position;\n"
@@ -694,7 +703,6 @@ GLSL_DEFINE(texMat3, GLSL_C_MAT4(NV_IGRAPH_XF_XFCTX_T3MAT))
 "\n"
 STRUCT_VERTEX_DATA);
 
-    // qstring_append_fmt(header, "layout(location = 20) noperspective out VertexData %c_vtx;\n",
     qstring_append_fmt(header, "noperspective out VertexData %c_vtx;\n",
                        vtx_prefix);
     qstring_append_fmt(header, "#define vtx %c_vtx\n",
@@ -900,13 +908,10 @@ ShaderBinding* generate_shaders(const ShaderState state)
                                  state.primitive_mode,
                                  &gl_primitive_mode);
     if (geometry_shader_code) {
-        const char* geometry_shader_code_str =
-             qstring_get_str(geometry_shader_code);
         geometry_shader = create_gl_shader(GL_GEOMETRY_SHADER,
-                                           geometry_shader_code_str,
+                                           qstring_get_str(geometry_shader_code),
                                            "geometry shader");
         qobject_unref(geometry_shader_code);
-
         vtx_prefix = 'v';
     } else {
         vtx_prefix = 'g';

@@ -524,13 +524,12 @@ static QString* psh_convert(struct PixelShader *ps)
     QString *preflight = qstring_new();
     qstring_append(preflight, STRUCT_VERTEX_DATA);
     qstring_append(preflight,
-"\n"
-// "in gl_PerFragment {\n"
-"    in vec4 gl_FragCoord;\n"
-// "};\n"
-"\n"
-);
-    // qstring_append(preflight, "layout(location = 20) noperspective in VertexData g_vtx;\n");
+        "\n"
+        "in gl_PerFragment {\n"
+        "    in vec4 gl_FragCoord;\n"
+        "};\n"
+        "\n"
+        );
     qstring_append(preflight, "noperspective in VertexData g_vtx;\n");
     qstring_append(preflight, "#define vtx g_vtx\n");
     qstring_append(preflight, "\n");
