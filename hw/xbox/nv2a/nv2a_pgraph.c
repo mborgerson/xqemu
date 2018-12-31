@@ -79,7 +79,8 @@ struct surface_cache_slot {
 
 int surface_cache_find(hwaddr addr)
 {
-    for (int i = 0; i < SURFACE_CACHE_SLOTS; i++) {
+    int i;
+    for (i = 0; i < SURFACE_CACHE_SLOTS; i++) {
         if (surface_cache[i].valid &&
             surface_cache[i].addr == addr) {
             return i;
