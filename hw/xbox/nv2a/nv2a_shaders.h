@@ -48,9 +48,7 @@ enum ShaderPolygonMode {
     POLY_MODE_LINE,
 };
 
-typedef struct ShaderState {
-    PshState psh;
-
+typedef struct VertexShaderState {
     bool texture_matrix_enable[4];
     enum VshTexgen texgen[4][4];
 
@@ -77,23 +75,17 @@ typedef struct ShaderState {
     enum ShaderPolygonMode polygon_front_mode;
     enum ShaderPolygonMode polygon_back_mode;
     enum ShaderPrimitiveMode primitive_mode;
-} ShaderState;
+} VertexShaderState;
 
-typedef struct ShaderBinding {
+typedef struct FragmentShaderState {
+    PshState psh;
+} FragmentShaderState;
+
+typedef struct VertexShaderBinding {
     GLuint gl_geom_prog;
     GLuint gl_vert_prog;
-    GLuint gl_frag_prog;
 
     GLenum gl_primitive_mode;
-
-    GLint psh_constant_loc[9][2];
-    GLint alpha_ref_loc;
-
-    GLint tex_scale_loc[NV2A_MAX_TEXTURES];
-
-    GLint bump_mat_loc[NV2A_MAX_TEXTURES];
-    GLint bump_scale_loc[NV2A_MAX_TEXTURES];
-    GLint bump_offset_loc[NV2A_MAX_TEXTURES];
 
     GLint surface_size_loc;
     GLint clip_range_loc;
@@ -105,7 +97,6 @@ typedef struct ShaderBinding {
     GLint ltctxb_loc[NV2A_LTCTXB_COUNT];
     GLint ltc1_loc[NV2A_LTC1_COUNT];
 
-    GLint fog_color_loc;
     GLint fog_param_loc[2];
     GLint light_infinite_half_vector_loc[NV2A_MAX_LIGHTS];
     GLint light_infinite_direction_loc[NV2A_MAX_LIGHTS];
@@ -116,9 +107,28 @@ typedef struct ShaderBinding {
 
     GLint constants_loc;
 
-    ShaderState state;
-} ShaderBinding;
+    VertexShaderState state;
+} VertexShaderBinding;
 
-ShaderBinding* generate_shaders(const ShaderState state);
+typedef struct FragmentShaderBinding {
+    GLuint gl_frag_prog;
+
+    GLint psh_constant_loc[9][2];
+    GLint alpha_ref_loc;
+
+    GLint tex_scale_loc[NV2A_MAX_TEXTURES];
+
+    GLint bump_mat_loc[NV2A_MAX_TEXTURES];
+    GLint bump_scale_loc[NV2A_MAX_TEXTURES];
+    GLint bump_offset_loc[NV2A_MAX_TEXTURES];
+
+    GLint fog_color_loc;
+    GLint clip_region_loc[8];
+
+    FragmentShaderState state;
+} FragmentShaderBinding;
+
+VertexShaderBinding *generate_vertex_shader(const VertexShaderState state);
+FragmentShaderBinding *generate_fragment_shader(const FragmentShaderState state);
 
 #endif

@@ -400,7 +400,8 @@ err:
 static void pgraph_method_log(unsigned int subchannel, unsigned int graphics_class, unsigned int method, uint32_t parameter);
 static void pgraph_allocate_inline_buffer_vertices(PGRAPHState *pg, unsigned int attr);
 static void pgraph_finish_inline_buffer_vertex(PGRAPHState *pg);
-static void pgraph_shader_update_constants(PGRAPHState *pg, ShaderBinding *binding, bool binding_changed, bool vertex_program, bool fixed_function);
+static void pgraph_vert_shader_update_constants(PGRAPHState *pg, VertexShaderBinding *binding, bool binding_changed, bool vertex_program, bool fixed_function);
+static void pgraph_frag_shader_update_constants(PGRAPHState *pg, FragmentShaderBinding *binding, bool binding_changed);
 static void pgraph_bind_shaders(PGRAPHState *pg);
 static bool pgraph_framebuffer_dirty(PGRAPHState *pg);
 static bool pgraph_color_write_enabled(PGRAPHState *pg);
@@ -425,8 +426,10 @@ static void texture_binding_destroy(gpointer data);
 static struct lru_node *texture_cache_entry_init(struct lru_node *obj, void *key);
 static struct lru_node *texture_cache_entry_deinit(struct lru_node *obj);
 static int texture_cache_entry_compare(struct lru_node *obj, void *key);
-static guint shader_hash(gconstpointer key);
-static gboolean shader_equal(gconstpointer a, gconstpointer b);
+static guint vertex_shader_hash(gconstpointer key);
+static gboolean vertex_shader_equal(gconstpointer a, gconstpointer b);
+static guint fragment_shader_hash(gconstpointer key);
+static gboolean fragment_shader_equal(gconstpointer a, gconstpointer b);
 static unsigned int kelvin_map_stencil_op(uint32_t parameter);
 static unsigned int kelvin_map_polygon_mode(uint32_t parameter);
 static unsigned int kelvin_map_texgen(uint32_t parameter, unsigned int channel);
@@ -1963,7 +1966,8 @@ static void pgraph_method(NV2AState *d,
 
         if (parameter == NV097_SET_BEGIN_END_OP_END) {
 
-            assert(pg->shader_binding);
+            assert(pg->vertex_shader_binding);
+            assert(pg->fragment_shader_binding);
 
             if (pg->draw_arrays_length) {
 
@@ -1974,7 +1978,7 @@ static void pgraph_method(NV2AState *d,
                 assert(pg->inline_elements_length == 0);
                 pgraph_bind_vertex_attributes(d, pg->draw_arrays_max_count,
                                               false, 0);
-                glMultiDrawArrays(pg->shader_binding->gl_primitive_mode,
+                glMultiDrawArrays(pg->vertex_shader_binding->gl_primitive_mode,
                                   pg->gl_draw_arrays_start,
                                   pg->gl_draw_arrays_count,
                                   pg->draw_arrays_length);
@@ -2041,7 +2045,7 @@ static void pgraph_method(NV2AState *d,
 
                 }
 
-                glDrawArrays(pg->shader_binding->gl_primitive_mode,
+                glDrawArrays(pg->vertex_shader_binding->gl_primitive_mode,
                              0, pg->inline_buffer_length);
             } else if (pg->inline_array_length) {
 
@@ -2052,7 +2056,7 @@ static void pgraph_method(NV2AState *d,
                 assert(pg->inline_elements_length == 0);
 
                 unsigned int index_count = pgraph_bind_inline_array(d);
-                glDrawArrays(pg->shader_binding->gl_primitive_mode,
+                glDrawArrays(pg->vertex_shader_binding->gl_primitive_mode,
                              0, index_count);
             } else if (pg->inline_elements_length) {
 
@@ -2105,7 +2109,7 @@ static void pgraph_method(NV2AState *d,
 #endif
                 // SDPRINTF("Uploading inline elements %zd, # %016lx ", pg->inline_elements_length, fast_hash(pg->inline_elements, pg->inline_elements_length*4, 0));
 
-                glDrawRangeElements(pg->shader_binding->gl_primitive_mode,
+                glDrawRangeElements(pg->vertex_shader_binding->gl_primitive_mode,
                                     min_element, max_element,
                                     pg->inline_elements_length,
                                     GL_UNSIGNED_INT,
@@ -3213,6 +3217,8 @@ static void pgraph_init(NV2AState *d)
     /*  Internal RGB565 texture format */
     assert(glo_check_extension("GL_ARB_ES2_compatibility"));
 
+    assert(glo_check_extension("GL_ARB_separate_shader_objects"));
+
     GLint max_vertex_attributes;
     glGetIntegerv(GL_MAX_VERTEX_ATTRIBS, &max_vertex_attributes);
     assert(max_vertex_attributes >= NV2A_VERTEXSHADER_ATTRIBUTES);
@@ -3289,7 +3295,8 @@ static void pgraph_init(NV2AState *d)
     for (i = 0; i < gcache_size; i++) lru_add_free(&pg->converted_buffer_cache, &pg->converted_buffer_cache_entries[i].node);
 #endif
 
-    pg->shader_cache = g_hash_table_new(shader_hash, shader_equal);
+    pg->vertex_shader_cache = g_hash_table_new(vertex_shader_hash, vertex_shader_equal);
+    pg->fragment_shader_cache = g_hash_table_new(fragment_shader_hash, fragment_shader_equal);
 
     for (i=0; i<NV2A_VERTEXSHADER_ATTRIBUTES; i++) {
         glGenBuffers(1, &pg->vertex_attributes[i].gl_converted_buffer);
@@ -3368,79 +3375,22 @@ static void pgraph_destroy(PGRAPHState *pg)
     glo_context_destroy(pg->gl_context);
 }
 
-static void pgraph_shader_update_constants(PGRAPHState *pg,
-                                           ShaderBinding *binding,
+static void pgraph_vert_shader_update_constants(PGRAPHState *pg,
+                                           VertexShaderBinding *binding,
                                            bool binding_changed,
                                            bool vertex_program,
                                            bool fixed_function)
 {
     int i, j;
 
-    /* update combiner constants */
-    for (i = 0; i < 9; i++) {
-        uint32_t constant[2];
-        if (i == 8) {
-            /* final combiner */
-            constant[0] = pg->regs[NV_PGRAPH_SPECFOGFACTOR0];
-            constant[1] = pg->regs[NV_PGRAPH_SPECFOGFACTOR1];
-        } else {
-            constant[0] = pg->regs[NV_PGRAPH_COMBINEFACTOR0 + i * 4];
-            constant[1] = pg->regs[NV_PGRAPH_COMBINEFACTOR1 + i * 4];
-        }
-
-        for (j = 0; j < 2; j++) {
-            GLint loc = binding->psh_constant_loc[i][j];
-            if (loc != -1) {
-                float value[4];
-                value[0] = (float) ((constant[j] >> 16) & 0xFF) / 255.0f;
-                value[1] = (float) ((constant[j] >> 8) & 0xFF) / 255.0f;
-                value[2] = (float) (constant[j] & 0xFF) / 255.0f;
-                value[3] = (float) ((constant[j] >> 24) & 0xFF) / 255.0f;
-
-                glProgramUniform4fv(binding->gl_frag_prog, loc, 1, value);
-            }
-        }
-    }
-    if (binding->alpha_ref_loc != -1) {
-        float alpha_ref = GET_MASK(pg->regs[NV_PGRAPH_CONTROL_0],
-                                   NV_PGRAPH_CONTROL_0_ALPHAREF) / 255.0;
-        glProgramUniform1f(binding->gl_frag_prog, binding->alpha_ref_loc, alpha_ref);
-    }
-
-
-    /* For each texture stage */
-    for (i = 0; i < NV2A_MAX_TEXTURES; i++) {
-        // char name[32];
-        GLint loc;
-
-        /* Bump luminance only during stages 1 - 3 */
-        if (i > 0) {
-            loc = binding->bump_mat_loc[i];
-            if (loc != -1) {
-                glProgramUniformMatrix2fv(binding->gl_frag_prog, loc, 1, GL_FALSE, pg->bump_env_matrix[i - 1]);
-            }
-            loc = binding->bump_scale_loc[i];
-            if (loc != -1) {
-                glProgramUniform1f(binding->gl_frag_prog, loc, *(float*)&pg->regs[
-                                NV_PGRAPH_BUMPSCALE1 + (i - 1) * 4]);
-            }
-            loc = binding->bump_offset_loc[i];
-            if (loc != -1) {
-                glProgramUniform1f(binding->gl_frag_prog, loc, *(float*)&pg->regs[
-                            NV_PGRAPH_BUMPOFFSET1 + (i - 1) * 4]);
-            }
-        }
-
-    }
-
-    if (binding->fog_color_loc != -1) {
-        uint32_t fog_color = pg->regs[NV_PGRAPH_FOGCOLOR];
-        glProgramUniform4f(binding->gl_frag_prog, binding->fog_color_loc,
-                    GET_MASK(fog_color, NV_PGRAPH_FOGCOLOR_RED) / 255.0,
-                    GET_MASK(fog_color, NV_PGRAPH_FOGCOLOR_GREEN) / 255.0,
-                    GET_MASK(fog_color, NV_PGRAPH_FOGCOLOR_BLUE) / 255.0,
-                    GET_MASK(fog_color, NV_PGRAPH_FOGCOLOR_ALPHA) / 255.0);
-    }
+    // if (binding->fog_color_loc != -1) {
+    //     uint32_t fog_color = pg->regs[NV_PGRAPH_FOGCOLOR];
+    //     glProgramUniform4f(binding->gl_frag_prog, binding->fog_color_loc,
+    //                 GET_MASK(fog_color, NV_PGRAPH_FOGCOLOR_RED) / 255.0,
+    //                 GET_MASK(fog_color, NV_PGRAPH_FOGCOLOR_GREEN) / 255.0,
+    //                 GET_MASK(fog_color, NV_PGRAPH_FOGCOLOR_BLUE) / 255.0,
+    //                 GET_MASK(fog_color, NV_PGRAPH_FOGCOLOR_ALPHA) / 255.0);
+    // }
     if (binding->fog_param_loc[0] != -1) {
         glProgramUniform1f(binding->gl_vert_prog, binding->fog_param_loc[0],
                     *(float*)&pg->regs[NV_PGRAPH_FOGPARAM0]);
@@ -3593,6 +3543,96 @@ static void pgraph_shader_update_constants(PGRAPHState *pg,
     }
 }
 
+static void pgraph_frag_shader_update_constants(PGRAPHState *pg,
+                                           FragmentShaderBinding *binding,
+                                           bool binding_changed)
+{
+    int i, j;
+
+    /* update combiner constants */
+    for (i = 0; i < 9; i++) {
+        uint32_t constant[2];
+        if (i == 8) {
+            /* final combiner */
+            constant[0] = pg->regs[NV_PGRAPH_SPECFOGFACTOR0];
+            constant[1] = pg->regs[NV_PGRAPH_SPECFOGFACTOR1];
+        } else {
+            constant[0] = pg->regs[NV_PGRAPH_COMBINEFACTOR0 + i * 4];
+            constant[1] = pg->regs[NV_PGRAPH_COMBINEFACTOR1 + i * 4];
+        }
+
+        for (j = 0; j < 2; j++) {
+            GLint loc = binding->psh_constant_loc[i][j];
+            if (loc != -1) {
+                float value[4];
+                value[0] = (float) ((constant[j] >> 16) & 0xFF) / 255.0f;
+                value[1] = (float) ((constant[j] >> 8) & 0xFF) / 255.0f;
+                value[2] = (float) (constant[j] & 0xFF) / 255.0f;
+                value[3] = (float) ((constant[j] >> 24) & 0xFF) / 255.0f;
+
+                glProgramUniform4fv(binding->gl_frag_prog, loc, 1, value);
+            }
+        }
+    }
+
+    if (binding->alpha_ref_loc != -1) {
+        float alpha_ref = GET_MASK(pg->regs[NV_PGRAPH_CONTROL_0],
+                                   NV_PGRAPH_CONTROL_0_ALPHAREF) / 255.0;
+        glProgramUniform1f(binding->gl_frag_prog, binding->alpha_ref_loc, alpha_ref);
+    }
+
+
+    /* For each texture stage */
+    for (i = 0; i < NV2A_MAX_TEXTURES; i++) {
+        // char name[32];
+        GLint loc;
+
+        /* Bump luminance only during stages 1 - 3 */
+        if (i > 0) {
+            loc = binding->bump_mat_loc[i];
+            if (loc != -1) {
+                glProgramUniformMatrix2fv(binding->gl_frag_prog, loc, 1, GL_FALSE, pg->bump_env_matrix[i - 1]);
+            }
+            loc = binding->bump_scale_loc[i];
+            if (loc != -1) {
+                glProgramUniform1f(binding->gl_frag_prog, loc, *(float*)&pg->regs[
+                                NV_PGRAPH_BUMPSCALE1 + (i - 1) * 4]);
+            }
+            loc = binding->bump_offset_loc[i];
+            if (loc != -1) {
+                glProgramUniform1f(binding->gl_frag_prog, loc, *(float*)&pg->regs[
+                            NV_PGRAPH_BUMPOFFSET1 + (i - 1) * 4]);
+            }
+        }
+
+    }
+
+    if (binding->fog_color_loc != -1) {
+        uint32_t fog_color = pg->regs[NV_PGRAPH_FOGCOLOR];
+        glProgramUniform4f(binding->gl_frag_prog, binding->fog_color_loc,
+                    GET_MASK(fog_color, NV_PGRAPH_FOGCOLOR_RED) / 255.0,
+                    GET_MASK(fog_color, NV_PGRAPH_FOGCOLOR_GREEN) / 255.0,
+                    GET_MASK(fog_color, NV_PGRAPH_FOGCOLOR_BLUE) / 255.0,
+                    GET_MASK(fog_color, NV_PGRAPH_FOGCOLOR_ALPHA) / 255.0);
+    }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 int shader_bindings;
 
 static void pgraph_bind_shaders(PGRAPHState *pg)
@@ -3612,25 +3652,10 @@ static void pgraph_bind_shaders(PGRAPHState *pg)
                          vertex_program ? "yes" : "no",
                          fixed_function ? "yes" : "no");
 
-    ShaderBinding* old_binding = pg->shader_binding;
+    VertexShaderBinding* old_vert_binding = pg->vertex_shader_binding;
+    FragmentShaderBinding* old_frag_binding = pg->fragment_shader_binding;
 
-    ShaderState state = {
-        .psh = (PshState){
-            /* register combier stuff */
-            .window_clip_exclusive = pg->regs[NV_PGRAPH_SETUPRASTER]
-                                       & NV_PGRAPH_SETUPRASTER_WINDOWCLIPTYPE,
-            .combiner_control = pg->regs[NV_PGRAPH_COMBINECTL],
-            .shader_stage_program = pg->regs[NV_PGRAPH_SHADERPROG],
-            .other_stage_input = pg->regs[NV_PGRAPH_SHADERCTL],
-            .final_inputs_0 = pg->regs[NV_PGRAPH_COMBINESPECFOG0],
-            .final_inputs_1 = pg->regs[NV_PGRAPH_COMBINESPECFOG1],
-
-            .alpha_test = pg->regs[NV_PGRAPH_CONTROL_0]
-                            & NV_PGRAPH_CONTROL_0_ALPHATESTENABLE,
-            .alpha_func = (enum PshAlphaFunc)GET_MASK(pg->regs[NV_PGRAPH_CONTROL_0],
-                                   NV_PGRAPH_CONTROL_0_ALPHAFUNC),
-        },
-
+    VertexShaderState state = {
         /* fixed function stuff */
         .skinning = (enum VshSkinning)GET_MASK(pg->regs[NV_PGRAPH_CSV0_D],
                                                NV_PGRAPH_CSV0_D_SKIN),
@@ -3654,8 +3679,26 @@ static void pgraph_bind_shaders(PGRAPHState *pg)
                                                               NV_PGRAPH_SETUPRASTER_BACKFACEMODE),
     };
 
-    if (!state.psh.alpha_test) {
-        state.psh.alpha_func = 0;
+    FragmentShaderState fstate = {
+        .psh = (PshState){
+            /* register combiner stuff */
+            .window_clip_exclusive = pg->regs[NV_PGRAPH_SETUPRASTER]
+                                       & NV_PGRAPH_SETUPRASTER_WINDOWCLIPTYPE,
+            .combiner_control = pg->regs[NV_PGRAPH_COMBINECTL],
+            .shader_stage_program = pg->regs[NV_PGRAPH_SHADERPROG],
+            .other_stage_input = pg->regs[NV_PGRAPH_SHADERCTL],
+            .final_inputs_0 = pg->regs[NV_PGRAPH_COMBINESPECFOG0],
+            .final_inputs_1 = pg->regs[NV_PGRAPH_COMBINESPECFOG1],
+
+            .alpha_test = pg->regs[NV_PGRAPH_CONTROL_0]
+                            & NV_PGRAPH_CONTROL_0_ALPHATESTENABLE,
+            .alpha_func = (enum PshAlphaFunc)GET_MASK(pg->regs[NV_PGRAPH_CONTROL_0],
+                                   NV_PGRAPH_CONTROL_0_ALPHAFUNC),
+        }
+    };
+
+    if (!fstate.psh.alpha_test) {
+        fstate.psh.alpha_func = 0;
     }
 
     state.program_length = 0;
@@ -3727,8 +3770,8 @@ static void pgraph_bind_shaders(PGRAPHState *pg)
      * following are zeroed-out), so let's avoid adding any more complicated
      * masking or copying logic here for now unless we discover a valid case.
      */
-    assert(!state.psh.window_clip_exclusive); /* FIXME: Untested */
-    state.psh.window_clip_count = 0;
+    assert(!fstate.psh.window_clip_exclusive); /* FIXME: Untested */
+    fstate.psh.window_clip_count = 0;
     uint32_t last_x = 0, last_y = 0;
 
     for (i = 0; i < 8; i++) {
@@ -3752,22 +3795,22 @@ static void pgraph_bind_shaders(PGRAPHState *pg)
         NV2A_DPRINTF("Clipping Region %d: min=(%d, %d) max=(%d, %d)\n",
             i, x_min, y_min, x_max, y_max);
 
-        state.psh.window_clip_count = i + 1;
+        fstate.psh.window_clip_count = i + 1;
         last_x = x;
         last_y = y;
     }
 
-    for (i = 0; i < (state.psh.combiner_control & 0xFF); i++) {
-        state.psh.rgb_inputs[i] = pg->regs[NV_PGRAPH_COMBINECOLORI0 + i * 4];
-        state.psh.rgb_outputs[i] = pg->regs[NV_PGRAPH_COMBINECOLORO0 + i * 4];
-        state.psh.alpha_inputs[i] = pg->regs[NV_PGRAPH_COMBINEALPHAI0 + i * 4];
-        state.psh.alpha_outputs[i] = pg->regs[NV_PGRAPH_COMBINEALPHAO0 + i * 4];
+    for (i = 0; i < (fstate.psh.combiner_control & 0xFF); i++) {
+        fstate.psh.rgb_inputs[i] = pg->regs[NV_PGRAPH_COMBINECOLORI0 + i * 4];
+        fstate.psh.rgb_outputs[i] = pg->regs[NV_PGRAPH_COMBINECOLORO0 + i * 4];
+        fstate.psh.alpha_inputs[i] = pg->regs[NV_PGRAPH_COMBINEALPHAI0 + i * 4];
+        fstate.psh.alpha_outputs[i] = pg->regs[NV_PGRAPH_COMBINEALPHAO0 + i * 4];
         //constant_0[i] = pg->regs[NV_PGRAPH_COMBINEFACTOR0 + i * 4];
         //constant_1[i] = pg->regs[NV_PGRAPH_COMBINEFACTOR1 + i * 4];
     }
 
     for (i = 0; i < 4; i++) {
-        state.psh.rect_tex[i] = false;
+        fstate.psh.rect_tex[i] = false;
         bool enabled = pg->regs[NV_PGRAPH_TEXCTL0_0 + i*4]
                          & NV_PGRAPH_TEXCTL0_0_ENABLE;
         unsigned int color_format =
@@ -3775,14 +3818,14 @@ static void pgraph_bind_shaders(PGRAPHState *pg)
                      NV_PGRAPH_TEXFMT0_COLOR);
 
         if (enabled && kelvin_color_format_map[color_format].linear) {
-            state.psh.rect_tex[i] = true;
+            fstate.psh.rect_tex[i] = true;
         }
 
         for (j = 0; j < 4; j++) {
-            state.psh.compare_mode[i][j] =
+            fstate.psh.compare_mode[i][j] =
                 (pg->regs[NV_PGRAPH_SHADERCLIPMODE] >> (4 * i + j)) & 1;
         }
-        state.psh.alphakill[i] = pg->regs[NV_PGRAPH_TEXCTL0_0 + i*4]
+        fstate.psh.alphakill[i] = pg->regs[NV_PGRAPH_TEXCTL0_0 + i*4]
                                & NV_PGRAPH_TEXCTL0_0_ALPHAKILLEN;
     }
 
@@ -3792,79 +3835,54 @@ static void pgraph_bind_shaders(PGRAPHState *pg)
 
     // printf("* Shader #%016lx cache ", fast_hash(&state, sizeof(state), 0));
 
-    ShaderBinding* cached_shader = (ShaderBinding*)g_hash_table_lookup(pg->shader_cache, &state);
+    VertexShaderBinding* cached_shader = (VertexShaderBinding*)g_hash_table_lookup(pg->vertex_shader_cache, &state);
     if (cached_shader) {
         // printf("hit\n");
-        pg->shader_binding = cached_shader;
+        pg->vertex_shader_binding = cached_shader;
     } else {
         // printf("miss\n");
-        pg->shader_binding = generate_shaders(state);
+        pg->vertex_shader_binding = generate_vertex_shader(state);
 
         /* cache it */
-        ShaderState *cache_state = (ShaderState *)g_malloc(sizeof(*cache_state));
+        VertexShaderState *cache_state = (VertexShaderState *)g_malloc(sizeof(*cache_state));
         memcpy(cache_state, &state, sizeof(*cache_state));
-        g_hash_table_insert(pg->shader_cache, cache_state,
-                            (gpointer)pg->shader_binding);
-
-        memcpy(&pg->shader_binding->state, &state, sizeof(ShaderState));
+        g_hash_table_insert(pg->vertex_shader_cache, cache_state,
+                            (gpointer)pg->vertex_shader_binding);
     }
 
-    bool binding_changed = (pg->shader_binding != old_binding);
+
+    FragmentShaderBinding* cached_frag_shader = (FragmentShaderBinding*)g_hash_table_lookup(pg->fragment_shader_cache, &fstate);
+    if (cached_frag_shader) {
+        // printf("hit\n");
+        pg->fragment_shader_binding = cached_frag_shader;
+    } else {
+        // printf("miss\n");
+        pg->fragment_shader_binding = generate_fragment_shader(fstate);
+
+        /* cache it */
+        FragmentShaderState *cache_state = (FragmentShaderState *)g_malloc(sizeof(*cache_state));
+        memcpy(cache_state, &fstate, sizeof(*cache_state));
+        g_hash_table_insert(pg->fragment_shader_cache, cache_state,
+                            (gpointer)pg->fragment_shader_binding);
+    }
+
+    bool vert_binding_changed = (pg->vertex_shader_binding != old_vert_binding);
+    bool frag_binding_changed = (pg->fragment_shader_binding != old_frag_binding);
+    bool binding_changed = vert_binding_changed | frag_binding_changed;
 
     if (binding_changed) {
         shader_bindings++;
     }
 
 #if 0
-    if ((old_binding != NULL) && binding_changed) {
+    if ((old_vert_binding != NULL) && vert_binding_changed) {
         printf("binding changed!\n");
 
         // Compare what changed
         #define DO_COMP(field) do { \
-            if (memcmp(&pg->shader_binding->state.field, &old_binding->state.field, sizeof(pg->shader_binding->state.field)) != 0) { \
+            if (memcmp(&pg->vertex_shader_binding->state.field, &old_vert_binding->state.field, sizeof(pg->vertex_shader_binding->state.field)) != 0) { \
                 printf(stringify(field) " changed!\n"); \
             }} while(0);
-
-
-
-        // PshState psh;
-
-        // uint32_t combiner_control;
-        // uint32_t shader_stage_program;
-        // uint32_t other_stage_input;
-        // uint32_t final_inputs_0;
-        // uint32_t final_inputs_1;
-
-        // uint32_t rgb_inputs[8], rgb_outputs[8];
-        // uint32_t alpha_inputs[8], alpha_outputs[8];
-
-        // bool rect_tex[4];
-        // bool compare_mode[4][4];
-        // bool alphakill[4];
-
-        // bool alpha_test;
-        // enum PshAlphaFunc alpha_func;
-
-        // bool window_clip_exclusive;
-        // unsigned int window_clip_count;
-
-        DO_COMP(psh.combiner_control);
-        DO_COMP(psh.shader_stage_program);
-        DO_COMP(psh.other_stage_input);
-        DO_COMP(psh.final_inputs_0);
-        DO_COMP(psh.final_inputs_1);
-        DO_COMP(psh.rgb_inputs);
-        DO_COMP(psh.rgb_outputs);
-        DO_COMP(psh.alpha_inputs);
-        DO_COMP(psh.alpha_outputs);
-        DO_COMP(psh.rect_tex);
-        DO_COMP(psh.compare_mode);
-        DO_COMP(psh.alphakill);
-        DO_COMP(psh.alpha_test);
-        DO_COMP(psh.alpha_func);
-        DO_COMP(psh.window_clip_exclusive);
-        DO_COMP(psh.window_clip_count);
-
 
         // bool texture_matrix_enable[4];
         DO_COMP( texture_matrix_enable);
@@ -3917,26 +3935,66 @@ static void pgraph_bind_shaders(PGRAPHState *pg)
         // enum ShaderPrimitiveMode primitive_mode;
         DO_COMP( primitive_mode);
     }
+    #undef DO_COMP
+#endif
+#if 0
+    if ((old_frag_binding != NULL) && frag_binding_changed) {
+        printf("binding changed!\n");
+
+        // Compare what changed
+        #define DO_COMP(field) do { \
+            if (memcmp(&pg->fragment_shader_binding->state.field, &old_frag_binding->state.field, sizeof(pg->fragment_shader_binding->state.field)) != 0) { \
+                printf(stringify(field) " changed!\n"); \
+            }} while(0);
+
+        DO_COMP(psh.combiner_control);
+        DO_COMP(psh.shader_stage_program);
+        DO_COMP(psh.other_stage_input);
+        DO_COMP(psh.final_inputs_0);
+        DO_COMP(psh.final_inputs_1);
+        DO_COMP(psh.rgb_inputs);
+        DO_COMP(psh.rgb_outputs);
+        DO_COMP(psh.alpha_inputs);
+        DO_COMP(psh.alpha_outputs);
+        DO_COMP(psh.rect_tex);
+        DO_COMP(psh.compare_mode);
+        DO_COMP(psh.alphakill);
+        DO_COMP(psh.alpha_test);
+        DO_COMP(psh.alpha_func);
+        DO_COMP(psh.window_clip_exclusive);
+        DO_COMP(psh.window_clip_count);
+
+    }
+    #undef DO_COMP
 #endif
     
-    glUseProgram(0);
+    // glUseProgram(0);
 
 // if ((old_binding == NULL) || binding_changed) {
-    glBindProgramPipeline(0);
-    glDeleteProgramPipelines(1, &pg->pipe);
+    // glBindProgramPipeline(0);
+    // glDeleteProgramPipelines(1, &pg->pipe);
 
 
-    glGenProgramPipelines(1, &pg->pipe);
-    glUseProgramStages(pg->pipe, GL_GEOMETRY_SHADER_BIT, pg->shader_binding->gl_geom_prog);
-    glUseProgramStages(pg->pipe, GL_VERTEX_SHADER_BIT,   pg->shader_binding->gl_vert_prog);
-    glUseProgramStages(pg->pipe, GL_FRAGMENT_SHADER_BIT, pg->shader_binding->gl_frag_prog);
+    // glGenProgramPipelines(1, &pg->pipe);
+    if (vert_binding_changed) {
+    glUseProgramStages(pg->pipe, GL_GEOMETRY_SHADER_BIT, pg->vertex_shader_binding->gl_geom_prog);
+    glUseProgramStages(pg->pipe, GL_VERTEX_SHADER_BIT,   pg->vertex_shader_binding->gl_vert_prog);
+    }
+
+    if (frag_binding_changed) {
+    glUseProgramStages(pg->pipe, GL_FRAGMENT_SHADER_BIT, pg->fragment_shader_binding->gl_frag_prog);
+    }
+
+    if (binding_changed) {
     glValidateProgramPipeline(pg->pipe);
-    glBindProgramPipeline(pg->pipe);
+    }
+
+    // glBindProgramPipeline(pg->pipe);
 // }
 
     /* Clipping regions */
-    for (i = 0; i < state.psh.window_clip_count; i++) {
-        if (pg->shader_binding->clip_region_loc[i] == -1) {
+    for (i = 0; i < fstate.psh.window_clip_count; i++) {
+        if (pg->fragment_shader_binding->clip_region_loc[i] == -1) {
             continue;
         }
 
@@ -3964,13 +4022,15 @@ static void pgraph_bind_shaders(PGRAPHState *pg)
         y_max *= 2;
 #endif
 
-        glProgramUniform4i(pg->shader_binding->gl_frag_prog,
-                           pg->shader_binding->clip_region_loc[i],
+        glProgramUniform4i(pg->fragment_shader_binding->gl_frag_prog,
+                           pg->fragment_shader_binding->clip_region_loc[i],
                            x_min, y_min, x_max + 1, y_max + 1);
     }
 
-    pgraph_shader_update_constants(pg, pg->shader_binding, binding_changed,
+    pgraph_vert_shader_update_constants(pg, pg->vertex_shader_binding, vert_binding_changed,
                                    vertex_program, fixed_function);
+
+    pgraph_frag_shader_update_constants(pg, pg->fragment_shader_binding, frag_binding_changed);
 
     NV2A_GL_DGROUP_END();
 }
@@ -4587,9 +4647,9 @@ static void pgraph_bind_textures(NV2AState *d)
         }
 
         if (!pg->texture_dirty[i] && pg->texture_binding[i]) {
-            if (pg->shader_binding->tex_scale_loc[i] != -1) {
-                glProgramUniform1f(pg->shader_binding->gl_frag_prog,
-                                   pg->shader_binding->tex_scale_loc[i], pg->texture_binding[i]->scale);
+            if (pg->fragment_shader_binding->tex_scale_loc[i] != -1) {
+                glProgramUniform1f(pg->fragment_shader_binding->gl_frag_prog,
+                                   pg->fragment_shader_binding->tex_scale_loc[i], pg->texture_binding[i]->scale);
             }
             glBindTexture(pg->texture_binding[i]->gl_target,
                           pg->texture_binding[i]->gl_texture);
@@ -4821,9 +4881,9 @@ static void pgraph_bind_textures(NV2AState *d)
                    state.dimensionality, state.cubemap ? " (Cubemap)" : "",
                    state.width, state.height, state.depth);
 
-        if (pg->shader_binding->tex_scale_loc[i] != -1) {
-            glProgramUniform1f(pg->shader_binding->gl_frag_prog,
-                               pg->shader_binding->tex_scale_loc[i], binding->scale);
+        if (pg->fragment_shader_binding->tex_scale_loc[i] != -1) {
+            glProgramUniform1f(pg->fragment_shader_binding->gl_frag_prog,
+                               pg->fragment_shader_binding->tex_scale_loc[i], binding->scale);
         }
 
         if (f.linear) {
@@ -5650,14 +5710,25 @@ static int texture_cache_entry_compare(struct lru_node *obj, void *key)
 }
 
 /* hash and equality for shader cache hash table */
-static guint shader_hash(gconstpointer key)
+static guint vertex_shader_hash(gconstpointer key)
 {
-    return fnv_hash((const uint8_t *)key, sizeof(ShaderState));
+    return fnv_hash((const uint8_t *)key, sizeof(VertexShaderState));
 }
-static gboolean shader_equal(gconstpointer a, gconstpointer b)
+static gboolean vertex_shader_equal(gconstpointer a, gconstpointer b)
 {
-    const ShaderState *as = (const ShaderState *)a, *bs = (const ShaderState *)b;
-    return memcmp(as, bs, sizeof(ShaderState)) == 0;
+    const VertexShaderState *as = (const VertexShaderState *)a, *bs = (const VertexShaderState *)b;
+    return memcmp(as, bs, sizeof(VertexShaderState)) == 0;
+}
+
+/* hash and equality for shader cache hash table */
+static guint fragment_shader_hash(gconstpointer key)
+{
+    return fnv_hash((const uint8_t *)key, sizeof(FragmentShaderState));
+}
+static gboolean fragment_shader_equal(gconstpointer a, gconstpointer b)
+{
+    const FragmentShaderState *as = (const FragmentShaderState *)a, *bs = (const FragmentShaderState *)b;
+    return memcmp(as, bs, sizeof(FragmentShaderState)) == 0;
 }
 
 static unsigned int kelvin_map_stencil_op(uint32_t parameter)

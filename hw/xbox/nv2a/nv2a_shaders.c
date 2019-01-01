@@ -297,7 +297,7 @@ static void append_skinning_code(QString* str, bool mix,
 
 #define GLSL_DEFINE(a, b) "#define " stringify(a) " " b "\n"
 
-static void generate_fixed_function(const ShaderState state,
+static void generate_fixed_function(const VertexShaderState state,
                                     QString *header, QString *body)
 {
     int i, j;
@@ -639,7 +639,7 @@ GLSL_DEFINE(sceneAmbientColor, GLSL_LTCTXA(NV_IGRAPH_XF_LTCTXA_FR_AMB) ".xyz")
 
 }
 
-static QString *generate_vertex_shader(const ShaderState state,
+static QString *generate_vertex_shader_source(const VertexShaderState state,
                                        char vtx_prefix)
 {
     int i;
@@ -890,12 +890,12 @@ static GLuint create_gl_shader(GLenum gl_shader_type,
 
 int shader_count = 0;
 
-ShaderBinding* generate_shaders(const ShaderState state)
+VertexShaderBinding *generate_vertex_shader(const VertexShaderState state)
 {
     int i, j;
     char tmp[64];
 
-    printf("Generating shader #%d\n", shader_count++);
+    printf("Generating vertex shader #%d\n", shader_count++);
 
     char vtx_prefix;
 
@@ -918,70 +918,30 @@ ShaderBinding* generate_shaders(const ShaderState state)
     }
 
     /* create the vertex shader */
-    QString *vertex_shader_code = generate_vertex_shader(state, vtx_prefix);
+    QString *vertex_shader_code = generate_vertex_shader_source(state, vtx_prefix);
     GLuint vertex_shader = create_gl_shader(GL_VERTEX_SHADER,
                                             qstring_get_str(vertex_shader_code),
                                             "vertex shader");
     qobject_unref(vertex_shader_code);
 
-    /* generate a fragment shader from register combiners */
-    QString *fragment_shader_code = psh_translate(state.psh);
-    GLuint fragment_shader = create_gl_shader(GL_FRAGMENT_SHADER,
-                                              qstring_get_str(fragment_shader_code),
-                                              "fragment shader");
-    qobject_unref(fragment_shader_code);
-
-    /* set texture samplers */
-    for (i = 0; i < NV2A_MAX_TEXTURES; i++) {
-        char samplerName[16];
-        snprintf(samplerName, sizeof(samplerName), "texSamp%d", i);
-        GLint texSampLoc = glGetUniformLocation(fragment_shader, samplerName);
-        if (texSampLoc >= 0) {
-            glProgramUniform1i(fragment_shader, texSampLoc, i);
-        }
-    }
-
-    ShaderBinding* ret = g_malloc0(sizeof(ShaderBinding));
+    VertexShaderBinding* ret = g_malloc0(sizeof(VertexShaderBinding));
     ret->gl_geom_prog = geometry_shader;
     ret->gl_vert_prog = vertex_shader;
-    ret->gl_frag_prog = fragment_shader;
     ret->gl_primitive_mode = gl_primitive_mode;
-
-    /* lookup texture scale uniforms */
-    for (i = 0; i < NV2A_MAX_TEXTURES; i++) {
-        snprintf(tmp, sizeof(tmp), "texScale%d", i);
-        ret->tex_scale_loc[i] = glGetUniformLocation(fragment_shader, tmp);
-    }
-
-    /* lookup fragment shader uniforms */
-    for (i = 0; i < 9; i++) {
-        for (j = 0; j < 2; j++) {
-            snprintf(tmp, sizeof(tmp), "c%d_%d", j, i);
-            ret->psh_constant_loc[i][j] = glGetUniformLocation(fragment_shader, tmp);
-        }
-    }
-    ret->alpha_ref_loc = glGetUniformLocation(fragment_shader, "alphaRef");
-    for (i = 1; i < NV2A_MAX_TEXTURES; i++) {
-        snprintf(tmp, sizeof(tmp), "bumpMat%d", i);
-        ret->bump_mat_loc[i] = glGetUniformLocation(fragment_shader, tmp);
-        snprintf(tmp, sizeof(tmp), "bumpScale%d", i);
-        ret->bump_scale_loc[i] = glGetUniformLocation(fragment_shader, tmp);
-        snprintf(tmp, sizeof(tmp), "bumpOffset%d", i);
-        ret->bump_offset_loc[i] = glGetUniformLocation(fragment_shader, tmp);
-    }
 
     /* lookup vertex shader uniforms */
     for(i = 0; i < NV2A_VERTEXSHADER_CONSTANTS; i++) {
         snprintf(tmp, sizeof(tmp), "c[%d]", i);
         ret->vsh_constant_loc[i] = glGetUniformLocation(vertex_shader, tmp);
     }
+
     ret->surface_size_loc = glGetUniformLocation(vertex_shader, "surfaceSize");
     ret->clip_range_loc = glGetUniformLocation(vertex_shader, "clipRange");
-    ret->fog_color_loc = glGetUniformLocation(fragment_shader, "fogColor");
+    // ret->fog_color_loc = glGetUniformLocation(fragment_shader, "fogColor");
     ret->fog_param_loc[0] = glGetUniformLocation(vertex_shader, "fogParam[0]");
     ret->fog_param_loc[1] = glGetUniformLocation(vertex_shader, "fogParam[1]");
-
     ret->inv_viewport_loc = glGetUniformLocation(vertex_shader, "invViewport");
+
     for (i = 0; i < NV2A_LTCTXA_COUNT; i++) {
         snprintf(tmp, sizeof(tmp), "ltctxa[%d]", i);
         ret->ltctxa_loc[i] = glGetUniformLocation(vertex_shader, tmp);
@@ -1005,17 +965,79 @@ ShaderBinding* generate_shaders(const ShaderState state)
         snprintf(tmp, sizeof(tmp), "lightLocalAttenuation%d", i);
         ret->light_local_attenuation_loc[i] = glGetUniformLocation(vertex_shader, tmp);
     }
-    for (i = 0; i < 8; i++) {
-        snprintf(tmp, sizeof(tmp), "clipRegion[%d]", i);
-        ret->clip_region_loc[i] = glGetUniformLocation(fragment_shader, tmp);
-    }
 
 #if USE_UBO
     ret->constants_loc = glGetUniformBlockIndex(vertex_shader, "constants");
     glUniformBlockBinding(vertex_shader, ret->constants_loc, 0);
 #endif
     
-    // memcpy(&ret->state, &state, sizeof(state));
+    // shader profiling
+    memcpy(&ret->state, &state, sizeof(state));
+
+    return ret;
+}
+
+FragmentShaderBinding *generate_fragment_shader(const FragmentShaderState state)
+{
+    int i, j;
+    char tmp[64];
+
+    printf("Generating fragment shader #%d\n", shader_count++);
+
+    /* generate a fragment shader from register combiners */
+    QString *fragment_shader_code = psh_translate(state.psh);
+    GLuint fragment_shader = create_gl_shader(GL_FRAGMENT_SHADER,
+                                              qstring_get_str(fragment_shader_code),
+                                              "fragment shader");
+    qobject_unref(fragment_shader_code);
+
+    /* set texture samplers */
+    for (i = 0; i < NV2A_MAX_TEXTURES; i++) {
+        char samplerName[16];
+        snprintf(samplerName, sizeof(samplerName), "texSamp%d", i);
+        GLint texSampLoc = glGetUniformLocation(fragment_shader, samplerName);
+        if (texSampLoc >= 0) {
+            glProgramUniform1i(fragment_shader, texSampLoc, i);
+        }
+    }
+
+    FragmentShaderBinding* ret = g_malloc0(sizeof(FragmentShaderBinding));
+    ret->gl_frag_prog = fragment_shader;
+
+    /* lookup texture scale uniforms */
+    for (i = 0; i < NV2A_MAX_TEXTURES; i++) {
+        snprintf(tmp, sizeof(tmp), "texScale%d", i);
+        ret->tex_scale_loc[i] = glGetUniformLocation(fragment_shader, tmp);
+    }
+
+    /* lookup fragment shader uniforms */
+    for (i = 0; i < 9; i++) {
+        for (j = 0; j < 2; j++) {
+            snprintf(tmp, sizeof(tmp), "c%d_%d", j, i);
+            ret->psh_constant_loc[i][j] = glGetUniformLocation(fragment_shader, tmp);
+        }
+    }
+
+    ret->alpha_ref_loc = glGetUniformLocation(fragment_shader, "alphaRef");
+    for (i = 1; i < NV2A_MAX_TEXTURES; i++) {
+        snprintf(tmp, sizeof(tmp), "bumpMat%d", i);
+        ret->bump_mat_loc[i] = glGetUniformLocation(fragment_shader, tmp);
+        snprintf(tmp, sizeof(tmp), "bumpScale%d", i);
+        ret->bump_scale_loc[i] = glGetUniformLocation(fragment_shader, tmp);
+        snprintf(tmp, sizeof(tmp), "bumpOffset%d", i);
+        ret->bump_offset_loc[i] = glGetUniformLocation(fragment_shader, tmp);
+    }
+
+    // fixme: move to vert shader output
+    ret->fog_color_loc = glGetUniformLocation(fragment_shader, "fogColor");
+
+    for (i = 0; i < 8; i++) {
+        snprintf(tmp, sizeof(tmp), "clipRegion[%d]", i);
+        ret->clip_region_loc[i] = glGetUniformLocation(fragment_shader, tmp);
+    }
+
+    // shader profiling
+    memcpy(&ret->state, &state, sizeof(state));
 
     return ret;
 }

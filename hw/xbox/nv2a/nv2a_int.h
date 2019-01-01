@@ -233,8 +233,10 @@ typedef struct PGRAPHState {
     struct GeometryKey *converted_buffer_cache_entries;
 
 
-    GHashTable *shader_cache;
-    ShaderBinding *shader_binding;
+    GHashTable *vertex_shader_cache;
+    GHashTable *fragment_shader_cache;
+    VertexShaderBinding *vertex_shader_binding;
+    FragmentShaderBinding *fragment_shader_binding;
 
     bool texture_matrix_enable[NV2A_MAX_TEXTURES];
 
