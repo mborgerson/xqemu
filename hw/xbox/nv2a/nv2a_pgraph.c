@@ -3238,7 +3238,7 @@ static void pgraph_init(NV2AState *d)
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8,
 #if RES_SCALE_4X
         640*2, 480*2,
-#else 
+#else
         640, 480,
 #endif
                  0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
@@ -3281,14 +3281,14 @@ static void pgraph_init(NV2AState *d)
     for (i = 0; i < gcache_size; i++) lru_add_free(&pg->inline_element_cache, &pg->inline_element_cache_entries[i].node);
 
     // inline_attribute_buffer_cache
-    gcache_size = 256;
+    gcache_size = 4096;
     lru_init(&pg->inline_attribute_buffer_cache, &gce_init, &gce_deinit, &gce_key_compare);
     pg->inline_attribute_buffer_cache_entries = malloc(gcache_size * sizeof(struct GeometryKey));
     assert(pg->inline_attribute_buffer_cache_entries);
     for (i = 0; i < gcache_size; i++) lru_add_free(&pg->inline_attribute_buffer_cache, &pg->inline_attribute_buffer_cache_entries[i].node);
 
     // converted_buffer_cache
-    gcache_size = 256;
+    gcache_size = 4096;
     lru_init(&pg->converted_buffer_cache, &gce_init, &gce_deinit, &gce_key_compare);
     pg->converted_buffer_cache_entries = malloc(gcache_size * sizeof(struct GeometryKey));
     assert(pg->converted_buffer_cache_entries);
@@ -3967,7 +3967,7 @@ static void pgraph_bind_shaders(PGRAPHState *pg)
     }
     #undef DO_COMP
 #endif
-    
+
     // glUseProgram(0);
 
 // if ((old_binding == NULL) || binding_changed) {
@@ -4274,7 +4274,7 @@ static void pgraph_update_surface_part(NV2AState *d, bool upload, bool color) {
 
         // FIXME: This code currently ignores the fact that the CPU may modify
         // the surface data!
-        // 
+        //
         // To do this in a way that allows the CPU to modify the surface at
         // any time we would need to protect the memory region containing the
         // surface and on CPU reads, download the surface into memory. Then
@@ -4329,7 +4329,7 @@ static void pgraph_update_surface_part(NV2AState *d, bool upload, bool color) {
                      width, height,
 #endif
                      0, gl_format, gl_type,
-                     NULL); // skipping upload 
+                     NULL); // skipping upload
 #endif
         } else {
             SDPRINTF("Found buffer in cache for %08lx!\n", surface->offset);
@@ -4357,7 +4357,7 @@ static void pgraph_update_surface_part(NV2AState *d, bool upload, bool color) {
 
         assert(glCheckFramebufferStatus(GL_FRAMEBUFFER)
             == GL_FRAMEBUFFER_COMPLETE);
-        
+
 #if !USE_SHARED_CONTEXT
         if (color) {
             pgraph_update_memory_buffer(d, dma.address + surface->offset,

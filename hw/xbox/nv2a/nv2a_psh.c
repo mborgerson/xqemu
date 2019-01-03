@@ -525,12 +525,12 @@ static QString* psh_convert(struct PixelShader *ps)
     qstring_append(preflight, STRUCT_VERTEX_DATA);
     qstring_append(preflight,
         "\n"
-        "in gl_PerFragment {\n"
+        // "in gl_PerFragment {\n"
         "    in vec4 gl_FragCoord;\n"
-        "};\n"
+        // "};\n"
         "\n"
         );
-    qstring_append(preflight, "noperspective in VertexData g_vtx;\n");
+    qstring_append(preflight, "layout(location = 20) noperspective in VertexData g_vtx;\n");
     qstring_append(preflight, "#define vtx g_vtx\n");
     qstring_append(preflight, "\n");
     qstring_append(preflight, "out vec4 fragColor;\n");
@@ -717,7 +717,7 @@ static QString* psh_convert(struct PixelShader *ps)
             assert(false);
             break;
         }
-        
+
         if (sampler_type != NULL) {
             qstring_append_fmt(preflight, "uniform float texScale%d;\n", i);
             qstring_append_fmt(preflight, "uniform %s texSamp%d;\n", sampler_type, i);

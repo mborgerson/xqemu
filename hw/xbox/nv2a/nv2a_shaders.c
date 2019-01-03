@@ -703,7 +703,7 @@ GLSL_DEFINE(texMat3, GLSL_C_MAT4(NV_IGRAPH_XF_XFCTX_T3MAT))
 "\n"
 STRUCT_VERTEX_DATA);
 
-    qstring_append_fmt(header, "noperspective out VertexData %c_vtx;\n",
+    qstring_append_fmt(header, "layout(location = 20) noperspective out VertexData %c_vtx;\n",
                        vtx_prefix);
     qstring_append_fmt(header, "#define vtx %c_vtx\n",
                        vtx_prefix);
@@ -869,6 +869,7 @@ static GLuint create_gl_shader(GLenum gl_shader_type,
         abort();
     }
 
+#if 0
     // Validate the program
     glValidateProgram(program);
     GLint valid = 0;
@@ -879,6 +880,7 @@ static GLuint create_gl_shader(GLenum gl_shader_type,
         fprintf(stderr, "nv2a: shader validation failed: %s\n", log);
         abort();
     }
+#endif
 
     // Mark shader for deletion when no longer in use by the program
     // glDetachShader(program, shader);
@@ -970,7 +972,7 @@ VertexShaderBinding *generate_vertex_shader(const VertexShaderState state)
     ret->constants_loc = glGetUniformBlockIndex(vertex_shader, "constants");
     glUniformBlockBinding(vertex_shader, ret->constants_loc, 0);
 #endif
-    
+
     // shader profiling
     memcpy(&ret->state, &state, sizeof(state));
 
