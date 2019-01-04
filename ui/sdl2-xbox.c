@@ -49,6 +49,9 @@ GLuint m_vert_shader;
 GLuint m_frag_shader;
 GLuint m_shader_prog;
 
+
+GLuint flip_sync;
+
 static void init_shaders(void);
 
 // Framebuffer sync
@@ -108,11 +111,11 @@ static void sdl2_gl_render_surface(struct sdl2_console *scon)
         GLuint display_tex;
         GLsync fence;
 
+
         qemu_spin_lock(&avail_spinner);
-        // FIXME: Probably a timing bug in here...
-        available = 0;
         display_tex = fb_tex;
         fence = fb_sync;
+        // available = 0; // <--
         qemu_spin_unlock(&avail_spinner);
 
         if (display_tex) {
@@ -125,7 +128,20 @@ static void sdl2_gl_render_surface(struct sdl2_console *scon)
             glBindTexture(GL_TEXTURE_2D, display_tex);
             glClear(GL_COLOR_BUFFER_BIT);
             glDrawArrays(GL_TRIANGLES, 0, 3);
+
+            flip_sync = glFenceSync( GL_SYNC_GPU_COMMANDS_COMPLETE, 0 );
+
+
+        qemu_spin_lock(&avail_spinner);
+        // display_tex = fb_tex;
+        // fence = fb_sync;
+        available = 0; // <--
+        qemu_spin_unlock(&avail_spinner);
+
             SDL_GL_SwapWindow(scon->real_window);
+
+
+
 
 #if 1
             if (second_elapse()) {
@@ -140,6 +156,13 @@ static void sdl2_gl_render_surface(struct sdl2_console *scon)
             frames++;
 #endif
         }
+
+#if 1
+        qemu_spin_lock(&avail_spinner);
+        // FIXME: Probably a timing bug in here...
+        available = 0;
+        qemu_spin_unlock(&avail_spinner);
+#endif
     }
 
 #else
@@ -154,7 +177,7 @@ static void sdl2_gl_render_surface(struct sdl2_console *scon)
 
 #endif // USE_SHARED_CONTEXT
 
-    // updates++;
+    updates++;
 }
 
 void sdl2_gl_update(DisplayChangeListener *dcl,
@@ -223,7 +246,6 @@ void sdl2_gl_refresh(DisplayChangeListener *dcl)
 
     assert(scon->opengl);
 
-    graphic_hw_update(dcl->con);
 #if USE_SHARED_CONTEXT
     // Force redraw
     sdl2_gl_render_surface(scon);
@@ -233,6 +255,10 @@ void sdl2_gl_refresh(DisplayChangeListener *dcl)
         sdl2_gl_render_surface(scon);
     }
 #endif
+    
+    // trigger int after we grab the frame
+    graphic_hw_update(dcl->con);
+
     sdl2_poll_events(scon);
 }
 
@@ -241,7 +267,7 @@ void sdl2_gl_redraw(struct sdl2_console *scon)
     assert(scon->opengl);
 
     if (scon->surface) {
-        sdl2_gl_render_surface(scon);
+        // sdl2_gl_render_surface(scon);
     }
 }
 

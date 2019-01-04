@@ -21,7 +21,7 @@
 #define USE_COROUTINES 1
 
 // Enable 4x surface rendering
-#define RES_SCALE_4X 1
+#define RES_SCALE_4X 0
 
 // Instead of writing surfaces out to memory...
 // - Hold on to them in a cache as they are likely to be re-used (don't re-upload)
@@ -37,6 +37,6 @@
 // is used where a new framebuffer is bound with the destination texture as
 // the color attachment and the surface is rendered into the framebuffer with
 // a shader that flips it upside down.
-#define RENDER_TO_TEXTURE_COPY 0
+#define RENDER_TO_TEXTURE_COPY 1
 
 #endif

@@ -496,7 +496,7 @@ static void add_final_stage_code(struct PixelShader *ps, struct FCInputInfo fina
     QString *b = get_input_var(ps, final.b, false);
     QString *c = get_input_var(ps, final.c, false);
     QString *d = get_input_var(ps, final.d, false);
-    QString *g = get_input_var(ps, final.g, true);
+    QString *g = get_input_var(ps, final.g, false);
 
     qstring_append_fmt(ps->code, "fragColor.rgb = %s + mix(vec3(%s), vec3(%s), vec3(%s));\n",
                        qstring_get_str(d), qstring_get_str(c),
@@ -523,6 +523,7 @@ static QString* psh_convert(struct PixelShader *ps)
 
     QString *preflight = qstring_new();
     qstring_append(preflight, STRUCT_VERTEX_DATA);
+    qstring_append(preflight, "layout(location = 0) noperspective in VertexData g_vtx;\n");
     qstring_append(preflight,
         "\n"
         // "in gl_PerFragment {\n"
@@ -530,7 +531,6 @@ static QString* psh_convert(struct PixelShader *ps)
         // "};\n"
         "\n"
         );
-    qstring_append(preflight, "layout(location = 20) noperspective in VertexData g_vtx;\n");
     qstring_append(preflight, "#define vtx g_vtx\n");
     qstring_append(preflight, "\n");
     qstring_append(preflight, "out vec4 fragColor;\n");

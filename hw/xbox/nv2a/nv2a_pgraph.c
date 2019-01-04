@@ -33,6 +33,25 @@
 #define TDPRINTF(...)
 #endif
 
+
+struct timeval timer_start, timer_stop;
+
+static void time_this(int start);
+
+static void time_this(int start)
+{
+    struct timeval tv_now, tv_since_start;
+
+    gettimeofday(&tv_now, NULL);
+
+    if (start) {
+        timer_start = tv_now;
+    } else {
+        timersub(&tv_now, &timer_start, &tv_since_start);
+        printf("[%4ld.%06ld]\n", tv_since_start.tv_sec, tv_since_start.tv_usec);
+    }
+}
+
 volatile int available = 0;
 volatile GLuint fb_tex = 0;
 volatile GLsync fb_sync = 0;
@@ -67,7 +86,7 @@ int surface_cache_find(hwaddr addr);
 int surface_cache_retire(int index);
 int surface_cache_store(hwaddr addr);
 
-#define SURFACE_CACHE_SLOTS 40
+#define SURFACE_CACHE_SLOTS 128
 
 struct surface_cache_slot {
     int valid;
@@ -760,6 +779,9 @@ static void pgraph_method(NV2AState *d,
 #if !USE_COROUTINES
             qemu_mutex_unlock(&pg->lock);
 #endif
+            printf("TIME TO UPDATE IRQ: ");
+            time_this(1);
+
             qemu_mutex_lock_iothread();
             CRPRINTF("updating IRQ\n");
             update_irq(d);
@@ -767,6 +789,8 @@ static void pgraph_method(NV2AState *d,
             qemu_mutex_lock(&pg->lock);
 #endif
             qemu_mutex_unlock_iothread();
+
+            time_this(0);
 
             while (pg->pending_interrupts & NV_PGRAPH_INTR_ERROR) {
 #if USE_COROUTINES
@@ -792,6 +816,7 @@ static void pgraph_method(NV2AState *d,
                  parameter);
         break;
     case NV097_SET_FLIP_WRITE:
+        SDPRINTF("NV097_SET_FLIP_WRITE -- crt = %08x\n",  d->pcrtc.start);
         NV2A_GL_DPRINTF(true, "NV097_SET_FLIP_WRITE -- crt = %08x",  d->pcrtc.start);
 
         SET_MASK(pg->regs[NV_PGRAPH_SURFACE], NV_PGRAPH_SURFACE_WRITE_3D,
@@ -802,7 +827,7 @@ static void pgraph_method(NV2AState *d,
                  parameter);
         break;
     case NV097_FLIP_INCREMENT_WRITE: {
-
+        SDPRINTF("NV097_FLIP_INCREMENT_WRITE\n");
                 // pgraph_update_surface(d, false, true, true);
 
 
@@ -823,6 +848,18 @@ static void pgraph_method(NV2AState *d,
 
         NV2A_GL_DPRINTF(true, "NV097_FLIP_INCREMENT_WRITE -- crt = %08x",  d->pcrtc.start);
 
+
+
+
+
+
+
+
+
+
+
+
+
 #if USE_SHARED_CONTEXT
         //---------------------------------------------------------------------------
         GLsync fence;
@@ -833,34 +870,44 @@ static void pgraph_method(NV2AState *d,
 
         if (index > 0) {
             NV2A_GL_DPRINTF(true, "Found GL buf! Making frame available (%d)", surface_cache[index].buf_id);
-            SDPRINTF("GL buf found in cache! %d\n", surface_cache[index].buf_id);
+            // printf("GL buf found in cache! %d\n", surface_cache[index].buf_id);
             fb_tex_tmp = surface_cache[index].buf_id;
             fence = surface_cache[index].fence;
         } else {
-            SDPRINTF("GL buf not found :(\n");
+            // printf("GL buf not found :(\n");
             fb_tex_tmp = 0;
             fence = 0;
         }
 
+
+        if (d->pcrtc.start == pg->gl_color_buffer_offset) {
+            printf("Single Buffered!\n");
+            fb_tex_tmp = pg->gl_color_buffer;
+            fence = glFenceSync( GL_SYNC_GPU_COMMANDS_COMPLETE, 0 );
+        }
+
 #if 0
-        fence = 0;
-        fb_tex_tmp = pg->gl_color_buffer;
+        while(1)
+        {
+            int result = glClientWaitSync(fence, GL_SYNC_FLUSH_COMMANDS_BIT, (GLuint64)(5000000000)); //5 Second timeout
+            if(result != GL_TIMEOUT_EXPIRED) break; //we ignore timeouts and wait until all OpenGL commands are processed!
+        }
 #endif
 
         if (fence == 0) {
             SDPRINTF("Sync point not found... forcing sync!\n");
             fence = glFenceSync( GL_SYNC_GPU_COMMANDS_COMPLETE, 0 );
-
-            // hmm
-            // if (fb_tex_tmp == 0) {
-            //     fb_tex_tmp = pg->gl_color_buffer;
-            // }
         }
 
+        glFinish();
+
+#if 0
         // Make frame available
         while (available) {
-            printf("waiting for frame to be consumed\n");
+            printf("waiting for previous frame to be consumed\n");
+            qemu_coroutine_yield();
         }
+#endif
         qemu_spin_lock(&avail_spinner);
         available = 1;
         fb_tex = fb_tex_tmp;
@@ -875,7 +922,20 @@ static void pgraph_method(NV2AState *d,
 #endif
 #endif
 
-        glo_set_current(pg->gl_context);
+#if 0
+        int reps = 0;
+        while (available) {
+            if (++reps > 750) { 
+                printf("waiting for frame to be consumed\n");
+                reps = 0;
+            }
+            qemu_coroutine_yield();
+        }
+#endif
+
+
+glo_set_current(pg->gl_context);
+
         NV2A_GL_DFRAME_TERMINATOR();
 
         //-----------------------------------------------------------------------------------
@@ -887,6 +947,42 @@ static void pgraph_method(NV2AState *d,
         pgraph_update_surface(d, false, true, true);
 
         NV2A_GL_DPRINTF(true, "NV097_FLIP_STALL -- crt = %08x",  d->pcrtc.start);
+
+
+        // if (flip_sync) {
+        //     glWaitSync(flip_sync, 0, GL_TIMEOUT_IGNORED);
+        // }
+
+        // time_this(1);
+
+#if 1
+{
+
+#if 1
+        if (fb_sync) {
+            printf("WAITING FOR FRAME TO FINISH: ");
+            time_this(1);
+            glClientWaitSync(fb_sync, GL_SYNC_FLUSH_COMMANDS_BIT, (GLuint64)(5000000000)); //5 Second timeout
+            time_this(0);
+        }
+#endif
+#if 0
+        int reps = 0;
+        while (available) {
+            if (++reps > 750) { 
+                SDPRINTF("waiting for frame to be consumed\n");
+                reps = 0;
+            }
+            qemu_coroutine_yield();
+        }
+#endif
+}
+#endif
+
+        // time_this(0);
+
+        printf("WAITING FOR FLIP: ");
+        time_this(1);
 
         while (true) {
             NV2A_DPRINTF("flip stall read: %d, write: %d, modulo: %d\n",
@@ -917,6 +1013,9 @@ static void pgraph_method(NV2AState *d,
             qemu_cond_wait(&pg->flip_3d, &pg->lock);
 #endif
         }
+
+
+            time_this(0);
 
         NV2A_GL_DPRINTF(true, "NV097_FLIP_STALL DONE -- crt = %08x",  d->pcrtc.start);
 
@@ -3126,7 +3225,6 @@ static void pgraph_render_surface_to_texture(
 
     // Set up viewport to prevent clipping
     glViewport(0, 0, width, height);
-    // glViewport(0, 0, width, height);
 
     // Bind surface as source texture, and a dummy vao for rendering the full screen triangle
     glActiveTexture(GL_TEXTURE0);
@@ -4097,6 +4195,7 @@ static void print_timestamp()
 
 
 
+
 static void pgraph_update_surface_part(NV2AState *d, bool upload, bool color) {
     PGRAPHState *pg = &d->pgraph;
 
@@ -4731,15 +4830,21 @@ static void pgraph_bind_textures(NV2AState *d)
             assert(levels > 0);
         }
 
+        unsigned int texture_vram_offset = 0;
+
         hwaddr dma_len;
         uint8_t *texture_data;
         if (dma_select) {
             texture_data = (uint8_t*)nv_dma_map(d, pg->dma_b, &dma_len);
+            // texture_vram_offset = pg->dma_b.address;
         } else {
             texture_data = (uint8_t*)nv_dma_map(d, pg->dma_a, &dma_len);
+            // texture_vram_offset = pg->dma_a.address;
         }
         assert(offset < dma_len);
         texture_data += offset;
+
+        texture_vram_offset = texture_data - d->vram_ptr;
 
         hwaddr palette_dma_len;
         uint8_t *palette_data;
@@ -4834,7 +4939,9 @@ static void pgraph_bind_textures(NV2AState *d)
 #if RENDER_TO_TEXTURE
         // FIXME: Probably move this into generate_texture
 
-        int index = surface_cache_find(offset);
+        // printf("tex %d = %08x (%d x %d)\n", i, texture_vram_offset, state.width, state.height);
+
+        int index = surface_cache_find(texture_vram_offset);
         if (index >= 0) {
             // Found a surface in the cache which matches the offset of this texture.
             // However, the cached surface may be stale and the address could just happen
@@ -4860,6 +4967,8 @@ static void pgraph_bind_textures(NV2AState *d)
                     binding->scale = 2.0f;
                 }
     #endif
+
+                // printf("-> found match");
 
             } else {
                 // printf("found match but bad color format\n");
