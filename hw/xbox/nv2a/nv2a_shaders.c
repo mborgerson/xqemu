@@ -233,8 +233,8 @@ static QString* generate_geometry_shader(
     qstring_append(s, layout_out);
     qstring_append(s, "\n"
                       STRUCT_VERTEX_DATA
-                      "noperspective layout(location = 0) in VertexData v_vtx[];\n"
-                      "noperspective layout(location = 0) out VertexData g_vtx;\n"
+                      "layout(location = 0) noperspective in VertexData v_vtx[];\n"
+                      "layout(location = 0) noperspective out VertexData g_vtx;\n"
                       "\n"
                       "void emit_vertex(int index) {\n"
                       "  gl_Position = gl_in[index].gl_Position;\n"
