@@ -496,7 +496,7 @@ static void add_final_stage_code(struct PixelShader *ps, struct FCInputInfo fina
     QString *b = get_input_var(ps, final.b, false);
     QString *c = get_input_var(ps, final.c, false);
     QString *d = get_input_var(ps, final.d, false);
-    QString *g = get_input_var(ps, final.g, false);
+    QString *g = get_input_var(ps, final.g, true);
 
     qstring_append_fmt(ps->code, "fragColor.rgb = %s + mix(vec3(%s), vec3(%s), vec3(%s));\n",
                        qstring_get_str(d), qstring_get_str(c),

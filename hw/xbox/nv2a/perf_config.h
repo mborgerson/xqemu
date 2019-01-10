@@ -21,7 +21,7 @@
 #define USE_COROUTINES 1
 
 // Enable 4x surface rendering
-#define RES_SCALE_4X 0
+#define RES_SCALE_4X 1
 
 // Instead of writing surfaces out to memory...
 // - Hold on to them in a cache as they are likely to be re-used (don't re-upload)

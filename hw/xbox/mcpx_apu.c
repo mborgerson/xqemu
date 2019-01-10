@@ -253,7 +253,7 @@ static void mcpx_apu_write(void *opaque, hwaddr addr,
             timer_del(d->se.frame_timer);
         } else {
             timer_mod(d->se.frame_timer,
-                qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL) + 10);
+                qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL) + 5);
         }
         d->regs[addr] = val;
         break;
@@ -624,7 +624,7 @@ static const MemoryRegionOps ep_ops = {
 static void se_frame(void *opaque)
 {
     MCPXAPUState *d = opaque;
-    timer_mod(d->se.frame_timer, qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL) + 10);
+    timer_mod(d->se.frame_timer, qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL) + 5);
     MCPX_DPRINTF("mcpx frame ping\n");
     int list;
     for (list = 0; list < 3; list++) {

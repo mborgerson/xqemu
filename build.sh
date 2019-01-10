@@ -15,7 +15,9 @@ package_windows() { # Script to prepare the windows exe
 postbuild=''
 debug_opts='--enable-debug'
 user_opts=''
-build_cflags='-O0 -g'
+build_cflags='-Og -g'
+build_cflags='-Ofast -march=native'
+# build_cflags='-O3 -march=native'
 job_count='4'
 
 while [ ! -z ${1} ]
