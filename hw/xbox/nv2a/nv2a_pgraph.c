@@ -826,7 +826,7 @@ static void pgraph_method(NV2AState *d,
             NV2A_DPRINTF("  - 0x%tx -> 0x%tx\n", source - d->vram_ptr,
                                                  dest - d->vram_ptr);
 
-#if RENDER_TO_TEXTURE
+#if 0 //RENDER_TO_TEXTURE
 
             // Create new surface at dest and put it in surface cache
             if (source - d->vram_ptr == pg->gl_color_buffer_offset) {
@@ -865,7 +865,7 @@ static void pgraph_method(NV2AState *d,
                         pg->gl_color_buffer, GL_TEXTURE_2D, 0, 0, height-i-1, 0,
     #else
                         pg->gl_color_buffer, GL_TEXTURE_2D, 0, 0, i, 0,
-    #endif                        
+    #endif
                         gl_buf,              GL_TEXTURE_2D, 0, 0, i, 0,
                         width/4, 1, 1);
                 }
@@ -885,7 +885,7 @@ static void pgraph_method(NV2AState *d,
                 if (index >= 0) {
                     printf("FOUND BLIT SRC IN SURFACE CACHE\n");
 #endif
-            }   
+            }
 
 #endif
 
@@ -1107,7 +1107,7 @@ static void pgraph_method(NV2AState *d,
 #if 0
         int reps = 0;
         while (available) {
-            // if (++reps > 750) { 
+            // if (++reps > 750) {
             //     printf("waiting for frame to be consumed\n");
             //     reps = 0;
             // }
@@ -1156,7 +1156,7 @@ glo_set_current(pg->gl_context);
 #if 0
         int reps = 0;
         while (available) {
-            if (++reps > 750) { 
+            if (++reps > 750) {
                 SDPRINTF("waiting for frame to be consumed\n");
                 reps = 0;
             }
@@ -3314,12 +3314,13 @@ static const char *frag_shader_src =
     "uniform int is_stencil;\n"
     "void main()\n"
     "{\n"
-        "if (is_stencil > 0) {\n"
-        "  float val = float(texture(utex, texCoord).r)/255.0;\n"
-        "  out_Color.rgba = vec4(0,0,val,0);\n"
-        "}\n"
-        "else \n"
-        "{ out_Color.rgba = texture(tex, texCoord); }\n"
+        // "if (is_stencil > 0) {\n"
+        // "  float val = float(texture(utex, texCoord).r)/255.0;\n"
+        // "  out_Color.rgba = vec4(0,0,val,0);\n"
+        // "}\n"
+        // "else \n"
+        // "{ out_Color.rgba = texture(tex, texCoord); }\n"
+        "out_Color.rgba = texture(tex, texCoord);\n"
     "}\n";
 
 GLuint texture_bound_location;
@@ -3404,7 +3405,7 @@ static void pgraph_render_surface_to_texture(
 
     GLint m_active_texture = 0;
 
-    glGetIntegerv(GL_ACTIVE_TEXTURE, &m_active_texture);
+    // glGetIntegerv(GL_ACTIVE_TEXTURE, &m_active_texture);
     glGetIntegerv(GL_VIEWPORT, m_viewport);
     glGetBooleanv(GL_COLOR_WRITEMASK, m_color_mask);
     m_scissor_test = glIsEnabled(GL_SCISSOR_TEST);
@@ -3413,11 +3414,14 @@ static void pgraph_render_surface_to_texture(
     m_cull = glIsEnabled(GL_CULL_FACE);
     m_depth_test = glIsEnabled(GL_DEPTH_TEST);
 
+
+    glWaitSync(fence, 0, GL_TIMEOUT_IGNORED);
+
     // Render the surface into the texture
     glBindFramebuffer(GL_FRAMEBUFFER, d->pgraph.r2t.copyFb);
 
     // Bind destination texture as framebuffer color attachment
-    // glBindTexture(dst_target, dst);
+    glBindTexture(dst_target, dst);
 
     // Reallocate space for new texture dimensions
     glTexImage2D(dst_target, 0, f.gl_internal_format,
@@ -3478,11 +3482,11 @@ static void pgraph_render_surface_to_texture(
 
 
     // rebind old tex0
-    glActiveTexture(GL_TEXTURE0);
-    if (m_tex0_bound) {
-        glBindTexture(GL_TEXTURE_2D, m_tex0_bound);
-    }
-    glActiveTexture(m_active_texture);
+    // glActiveTexture(GL_TEXTURE0);
+    // if (m_tex0_bound) {
+    //     glBindTexture(GL_TEXTURE_2D, m_tex0_bound);
+    // }
+    // glActiveTexture(m_active_texture);
 
     // Restore state saved on stack, framebuffer/vertex arrays/etc
     glBindFramebuffer(GL_FRAMEBUFFER, d->pgraph.gl_framebuffer);
@@ -4578,7 +4582,7 @@ static void pgraph_update_surface_part(NV2AState *d, bool upload, bool color) {
             surface_cache[index].buf_id = *gl_buffer;
             surface_cache[index].fence = glFenceSync( GL_SYNC_GPU_COMMANDS_COMPLETE, 0 ); // Should probably be moved below
             surface_cache[index].color = color;
-            
+
             memcpy(&surface_cache[index].shape, &pg->last_surface_shape, sizeof(SurfaceShape));
 #else
             SDPRINTF("Releasing buffer %d\n", *gl_buffer);
@@ -5878,7 +5882,7 @@ static void upload_gl_texture(GLenum gl_target,
 
 
 static void generate_texture_upload(
-    const TextureShape s, 
+    const TextureShape s,
     const uint8_t *texture_data,
     const uint8_t *palette_data,
     TextureBinding *binding)
