@@ -34,6 +34,64 @@
 #endif
 
 
+struct timeval tv_start;
+int tv_start_valid = 0;
+
+static void print_timestamp()
+{
+    struct timeval tv_now, tv_since_start;
+
+    gettimeofday(&tv_now, NULL);
+
+    if (!tv_start_valid) {
+        tv_start = tv_now;
+        tv_start_valid = 1;
+    }
+
+    timersub(&tv_now, &tv_start, &tv_since_start);
+
+    printf("[%4ld.%06ld] ", tv_since_start.tv_sec, tv_since_start.tv_usec);
+}
+
+
+
+
+struct timeval frame_timer_start;
+int frame_timer_started = 0;
+
+static void start_frame_timer()
+{
+#if 0
+    if (frame_timer_started) return;
+    gettimeofday(&frame_timer_start, NULL);
+    frame_timer_started = 1;
+#endif
+}
+
+int i = 0;
+
+static void stop_frame_timer()
+{
+#if 0
+    if (!frame_timer_started) return;
+    struct timeval tv_now, tv_since_start;
+    gettimeofday(&tv_now, NULL);
+    timersub(&tv_now, &frame_timer_start, &tv_since_start);
+
+    double s_per_frame = tv_since_start.tv_usec/1000000.0 + tv_since_start.tv_sec;
+    double ms_per_frame = s_per_frame * 1000;
+
+    if (i++ > 10) {
+        printf("--- [ms %4f, rfps = %4f]\n", (float)ms_per_frame, s_per_frame > 0.0 ? 1.0/(float)s_per_frame : 0.0);
+        i = 0;
+    }
+    frame_timer_started = 0;
+#endif
+}
+
+
+
+
 struct timeval timer_start, timer_stop;
 
 static void time_this(int start);
@@ -94,6 +152,7 @@ struct surface_cache_slot {
     SurfaceShape shape;
     GLuint buf_id;
     GLsync fence;
+    int color;
 } surface_cache[SURFACE_CACHE_SLOTS];
 
 int surface_cache_find(hwaddr addr)
@@ -462,6 +521,11 @@ static uint8_t* convert_texture_data(const TextureShape s, const uint8_t *data, 
 static void upload_gl_texture(GLenum gl_target, const TextureShape s, const uint8_t *texture_data, const uint8_t *palette_data);
 static TextureBinding* generate_texture(const TextureShape s, const uint8_t *texture_data, const uint8_t *palette_data);
 static void texture_binding_destroy(gpointer data);
+
+static struct lru_node *texture_location_cache_entry_init(struct lru_node *obj, void *key);
+static struct lru_node *texture_location_cache_entry_deinit(struct lru_node *obj);
+static int texture_location_cache_entry_compare(struct lru_node *obj, void *key);
+
 static struct lru_node *texture_cache_entry_init(struct lru_node *obj, void *key);
 static struct lru_node *texture_cache_entry_deinit(struct lru_node *obj);
 static int texture_cache_entry_compare(struct lru_node *obj, void *key);
@@ -474,6 +538,9 @@ static unsigned int kelvin_map_polygon_mode(uint32_t parameter);
 static unsigned int kelvin_map_texgen(uint32_t parameter, unsigned int channel);
 static uint64_t fnv_hash(const uint8_t *data, size_t len);
 static uint64_t fast_hash(const uint8_t *data, size_t len, unsigned int samples);
+
+
+NV2AState *fuck_fuck_fixme;
 
 /* PGRAPH - accelerated 2d/3d drawing engine */
 uint64_t pgraph_read(void *opaque, hwaddr addr, unsigned int size)
@@ -807,6 +874,7 @@ static void pgraph_method(NV2AState *d,
                 int index = surface_cache_store(dest - d->vram_ptr);
                 surface_cache[index].buf_id = gl_buf;
                 surface_cache[index].fence = glFenceSync( GL_SYNC_GPU_COMMANDS_COMPLETE, 0 ); // Should probably be moved below
+                surface_cache[index].color = 1; //fixme
                 memcpy(&surface_cache[index].shape, &pg->surface_shape, sizeof(SurfaceShape));
 
                 printf("CREATED NEW ENTRY IN SURFACE CACHE\n");
@@ -932,6 +1000,7 @@ static void pgraph_method(NV2AState *d,
                  parameter);
         break;
     case NV097_FLIP_INCREMENT_WRITE: {
+
         SDPRINTF("NV097_FLIP_INCREMENT_WRITE\n");
                 // pgraph_update_surface(d, false, true, true);
 
@@ -986,18 +1055,25 @@ static void pgraph_method(NV2AState *d,
 
 
         if (d->pcrtc.start == pg->gl_color_buffer_offset) {
-            printf("Single Buffered!\n");
+            // printf("Single Buffered!\n");
             fb_tex_tmp = pg->gl_color_buffer;
             fence = glFenceSync( GL_SYNC_GPU_COMMANDS_COMPLETE, 0 );
         }
 
-#if 0
+
+#if 1
         while(1)
         {
             int result = glClientWaitSync(fence, GL_SYNC_FLUSH_COMMANDS_BIT, (GLuint64)(5000000000)); //5 Second timeout
             if(result != GL_TIMEOUT_EXPIRED) break; //we ignore timeouts and wait until all OpenGL commands are processed!
         }
 #endif
+
+
+        // print_timestamp();
+        // printf("FRAME COMPLETE\n");
+
+        stop_frame_timer();
 
 #if 0
         if (fence == 0) {
@@ -2111,8 +2187,8 @@ glo_set_current(pg->gl_context);
          *        the report memory block?
          */
         if (pg->gl_zpass_pixel_count_query_count) {
-            glDeleteQueries(pg->gl_zpass_pixel_count_query_count,
-                            pg->gl_zpass_pixel_count_queries);
+            // glDeleteQueries(pg->gl_zpass_pixel_count_query_count,
+            //                 pg->gl_zpass_pixel_count_queries);
             pg->gl_zpass_pixel_count_query_count = 0;
         }
         pg->zpass_pixel_count_result = 0;
@@ -2140,15 +2216,15 @@ glo_set_current(pg->gl_context);
          */
         /* FIXME: What about clipping regions etc? */
         for(i = 0; i < pg->gl_zpass_pixel_count_query_count; i++) {
-            GLuint gl_query_result;
-            glGetQueryObjectuiv(pg->gl_zpass_pixel_count_queries[i],
-                                GL_QUERY_RESULT,
-                                &gl_query_result);
+            GLuint gl_query_result = 0;
+            // glGetQueryObjectuiv(pg->gl_zpass_pixel_count_queries[i],
+            //                     GL_QUERY_RESULT,
+            //                     &gl_query_result);
             pg->zpass_pixel_count_result += gl_query_result;
         }
         if (pg->gl_zpass_pixel_count_query_count) {
-            glDeleteQueries(pg->gl_zpass_pixel_count_query_count,
-                            pg->gl_zpass_pixel_count_queries);
+            // glDeleteQueries(pg->gl_zpass_pixel_count_query_count,
+            //                 pg->gl_zpass_pixel_count_queries);
         }
         pg->gl_zpass_pixel_count_query_count = 0;
 
@@ -2511,15 +2587,15 @@ glo_set_current(pg->gl_context);
 
             /* Visibility testing */
             if (pg->zpass_pixel_count_enable) {
-                GLuint gl_query;
-                glGenQueries(1, &gl_query);
+                GLuint gl_query = 0;
+                // glGenQueries(1, &gl_query);
                 pg->gl_zpass_pixel_count_query_count++;
                 pg->gl_zpass_pixel_count_queries = (GLuint*)g_realloc(
                     pg->gl_zpass_pixel_count_queries,
                     sizeof(GLuint) * pg->gl_zpass_pixel_count_query_count);
                 pg->gl_zpass_pixel_count_queries[
                     pg->gl_zpass_pixel_count_query_count - 1] = gl_query;
-                glBeginQuery(GL_SAMPLES_PASSED, gl_query);
+                // glBeginQuery(GL_SAMPLES_PASSED, gl_query);
             }
         }
 
@@ -2857,6 +2933,12 @@ glo_set_current(pg->gl_context);
                 gl_mask |= GL_DEPTH_BUFFER_BIT;
                 glDepthMask(GL_TRUE);
                 glClearDepth(gl_clear_depth);
+
+
+                // print_timestamp();
+                // printf("HALO CLEAR\n");
+                start_frame_timer();
+
             }
             if (parameter & NV097_CLEAR_SURFACE_STENCIL) {
                 gl_mask |= GL_STENCIL_BUFFER_BIT;
@@ -3228,11 +3310,21 @@ static const char *frag_shader_src =
     "in vec2 texCoord;\n"
     "out vec4 out_Color;\n"
     "uniform sampler2D tex;\n"
+    "uniform usampler2D utex;\n"
+    "uniform int is_stencil;\n"
     "void main()\n"
     "{\n"
-        "out_Color.rgba = texture(tex, texCoord);\n"
+        "if (is_stencil > 0) {\n"
+        "  float val = float(texture(utex, texCoord).r)/255.0;\n"
+        "  out_Color.rgba = vec4(0,0,val,0);\n"
+        "}\n"
+        "else \n"
+        "{ out_Color.rgba = texture(tex, texCoord); }\n"
     "}\n";
 
+GLuint texture_bound_location;
+GLuint is_stencil_uni;
+GLuint utex_loc;
 
 #if RENDER_TO_TEXTURE
 static void pgraph_setup_surface_to_texture(NV2AState *d)
@@ -3278,7 +3370,9 @@ static void pgraph_setup_surface_to_texture(NV2AState *d)
     glLinkProgram(pg->r2t.m_shader_prog);
     glUseProgram(pg->r2t.m_shader_prog);
 
-    glUniform1i(glGetUniformLocation(pg->r2t.m_shader_prog, "tex"), 0);
+    texture_bound_location = glGetUniformLocation(pg->r2t.m_shader_prog, "tex");
+    utex_loc = glGetUniformLocation(pg->r2t.m_shader_prog, "utex");
+    is_stencil_uni = glGetUniformLocation(pg->r2t.m_shader_prog, "is_stencil");
 
     // Populate an empty vertex buffer
     glGenBuffers(1, &pg->r2t.m_vbo);
@@ -3294,7 +3388,7 @@ static void pgraph_render_surface_to_texture(
     NV2AState *d, GLsync fence,
     GLuint src, GLenum src_format, GLenum src_target,
     GLuint dst, GLenum dst_format, GLenum dst_target,
-    int width, int height
+    int width, int height, int src_zeta
     )
 {
     ColorFormatInfo f = kelvin_color_format_map[dst_format];
@@ -3308,6 +3402,9 @@ static void pgraph_render_surface_to_texture(
     GLboolean m_cull;
     GLboolean m_depth_test;
 
+    GLint m_active_texture = 0;
+
+    glGetIntegerv(GL_ACTIVE_TEXTURE, &m_active_texture);
     glGetIntegerv(GL_VIEWPORT, m_viewport);
     glGetBooleanv(GL_COLOR_WRITEMASK, m_color_mask);
     m_scissor_test = glIsEnabled(GL_SCISSOR_TEST);
@@ -3320,7 +3417,7 @@ static void pgraph_render_surface_to_texture(
     glBindFramebuffer(GL_FRAMEBUFFER, d->pgraph.r2t.copyFb);
 
     // Bind destination texture as framebuffer color attachment
-    glBindTexture(dst_target, dst);
+    // glBindTexture(dst_target, dst);
 
     // Reallocate space for new texture dimensions
     glTexImage2D(dst_target, 0, f.gl_internal_format,
@@ -3343,10 +3440,29 @@ static void pgraph_render_surface_to_texture(
 
     // Bind surface as source texture, and a dummy vao for rendering the full screen triangle
     glActiveTexture(GL_TEXTURE0);
+
+
+    // get texture bound here before so we can bind it again after
+    GLint m_tex0_bound;
+    glGetIntegerv(GL_TEXTURE_BINDING_2D, &m_tex0_bound);
+
+
     glBindTexture(GL_TEXTURE_2D, src);
     glBindVertexArray(d->pgraph.r2t.m_vao);
     glBindBuffer(GL_ARRAY_BUFFER, d->pgraph.r2t.m_vbo);
     glUseProgram(d->pgraph.r2t.m_shader_prog);
+
+    // in case of zeta source, probably want the stencil component
+    if (src_zeta) {
+        glTexParameteri(GL_TEXTURE_2D, GL_DEPTH_STENCIL_TEXTURE_MODE, GL_STENCIL_INDEX);
+        // GLenum swizzle_mask[4] = {GL_RED, GL_RED, GL_RED, GL_RED};
+        // glTexParameteriv(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_RGBA, (const GLint *)swizzle_mask);
+    }
+
+    // assign current texture unit
+    glProgramUniform1i(d->pgraph.r2t.m_shader_prog, texture_bound_location, 0);//m_active_texture);
+    glProgramUniform1i(d->pgraph.r2t.m_shader_prog, utex_loc, 0);//m_active_texture);
+    glProgramUniform1i(d->pgraph.r2t.m_shader_prog, is_stencil_uni, src_zeta);
 
     // Render
     glColorMask(true, true, true, true);
@@ -3359,6 +3475,14 @@ static void pgraph_render_surface_to_texture(
     glClearColor(0.0f, 0.0f, 1.0f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT);
     glDrawArrays(GL_TRIANGLES, 0, 3);
+
+
+    // rebind old tex0
+    glActiveTexture(GL_TEXTURE0);
+    if (m_tex0_bound) {
+        glBindTexture(GL_TEXTURE_2D, m_tex0_bound);
+    }
+    glActiveTexture(m_active_texture);
 
     // Restore state saved on stack, framebuffer/vertex arrays/etc
     glBindFramebuffer(GL_FRAMEBUFFER, d->pgraph.gl_framebuffer);
@@ -3406,6 +3530,8 @@ static void pgraph_init(NV2AState *d)
     int i;
 
     PGRAPHState *pg = &d->pgraph;
+
+    fuck_fuck_fixme = d;
 
 #if USE_COROUTINES
     qemu_spin_init(&pg->lock);
@@ -3474,6 +3600,21 @@ static void pgraph_init(NV2AState *d)
     for (i = 0; i < texture_cache_size; i++) {
         lru_add_free(&pg->texture_cache, &pg->texture_cache_entries[i].node);
     }
+
+#if USE_TEXTURE_LOCATION_CACHE
+    // Initialize texture location cache
+    const size_t texture_location_cache_size = 512;
+    lru_init(&pg->texture_location_cache,
+        &texture_location_cache_entry_init,
+        &texture_location_cache_entry_deinit,
+        &texture_location_cache_entry_compare);
+    pg->texture_location_cache_entries = malloc(texture_location_cache_size * sizeof(struct TextureLocationKey));
+    assert(pg->texture_location_cache_entries != NULL);
+    for (i = 0; i < texture_location_cache_size; i++) {
+        lru_add_free(&pg->texture_location_cache, &pg->texture_location_cache_entries[i].node);
+    }
+#endif
+
 
 #if USE_GEOMETRY_CACHE
     // Pre-allocate objects for geometry cache
@@ -4287,27 +4428,6 @@ static void pgraph_set_surface_dirty(PGRAPHState *pg, bool color, bool zeta)
     pg->surface_zeta.draw_dirty |= zeta;
 }
 
-#if PROFILE_SURFACES
-struct timeval tv_start;
-int tv_start_valid = 0;
-
-static void print_timestamp()
-{
-    struct timeval tv_now, tv_since_start;
-
-    gettimeofday(&tv_now, NULL);
-
-    if (!tv_start_valid) {
-        tv_start = tv_now;
-        tv_start_valid = 1;
-    }
-
-    timersub(&tv_now, &tv_start, &tv_since_start);
-
-    SDPRINTF("[%4ld.%06ld] ", tv_since_start.tv_sec, tv_since_start.tv_usec);
-}
-#endif
-
 
 
 
@@ -4457,6 +4577,8 @@ static void pgraph_update_surface_part(NV2AState *d, bool upload, bool color) {
             int index = surface_cache_store(*cur_buffer_addr);
             surface_cache[index].buf_id = *gl_buffer;
             surface_cache[index].fence = glFenceSync( GL_SYNC_GPU_COMMANDS_COMPLETE, 0 ); // Should probably be moved below
+            surface_cache[index].color = color;
+            
             memcpy(&surface_cache[index].shape, &pg->last_surface_shape, sizeof(SurfaceShape));
 #else
             SDPRINTF("Releasing buffer %d\n", *gl_buffer);
@@ -4513,6 +4635,12 @@ static void pgraph_update_surface_part(NV2AState *d, bool upload, bool color) {
         glGenTextures(1, gl_buffer);
         SDPRINTF("Created buffer %d\n", *gl_buffer);
         glBindTexture(GL_TEXTURE_2D, *gl_buffer);
+
+        NV2A_GL_DLABEL(GL_TEXTURE, *gl_buffer,
+                       "%s format: %0X, width: %d, height: %d",
+                       color ? "color" : "zeta",
+                       color ? pg->surface_shape.color_format : pg->surface_shape.zeta_format,
+                       width, height);
 
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
@@ -4720,7 +4848,7 @@ static void pgraph_update_surface(NV2AState *d, bool upload,
             surface_cache[index].buf_id = pg->gl_color_buffer;
             surface_cache[index].shape = pg->last_surface_shape;
             surface_cache[index].fence = glFenceSync( GL_SYNC_GPU_COMMANDS_COMPLETE, 0 ); // Should probably be moved below
-
+            surface_cache[index].color = 1;
 #else
             SDPRINTF("Releasing color buffer (%d)\n", pg->gl_color_buffer);
             glDeleteTextures(1, &pg->gl_color_buffer);
@@ -4744,7 +4872,7 @@ static void pgraph_update_surface(NV2AState *d, bool upload,
             surface_cache[index].buf_id = pg->gl_zeta_buffer;
             surface_cache[index].shape = pg->last_surface_shape;
             surface_cache[index].fence = glFenceSync( GL_SYNC_GPU_COMMANDS_COMPLETE, 0 ); // Should probably be moved below
-
+            surface_cache[index].color = 0;
 #else
             SDPRINTF("Releasing zeta buffer (%d)\n", pg->gl_zeta_buffer);
             glDeleteTextures(1, &pg->gl_zeta_buffer);
@@ -5029,6 +5157,26 @@ static void pgraph_bind_textures(NV2AState *d)
         };
 
 #ifdef USE_TEXTURE_CACHE
+
+
+#if USE_TEXTURE_LOCATION_CACHE
+        TextureLocationKey key = {
+            .state = state,
+            .texture_data = texture_data,
+            .texture_data_offset = texture_data - d->vram_ptr,
+            .texture_len = length,
+            .palette_data = palette_data,
+            .palette_data_offset = palette_data - d->vram_ptr,
+            .palette_len = palette_length
+        };
+
+        uint64_t texture_hash = fast_hash(&key, sizeof(key), 5003);
+
+        struct lru_node *found = lru_lookup(&pg->texture_location_cache, texture_hash, &key);
+        TextureLocationKey *key_out = container_of(found, struct TextureLocationKey, node);
+        assert((key_out != NULL) && (key_out->binding != NULL));
+
+#else // USE_TEXTURE_LOCATION_CACHE
         uint64_t texture_hash = fast_hash(texture_data, length, 5003)
                               ^ fnv_hash(palette_data, palette_length);
 
@@ -5038,10 +5186,11 @@ static void pgraph_bind_textures(NV2AState *d)
             .palette_data = palette_data,
         };
 
-
         struct lru_node *found = lru_lookup(&pg->texture_cache, texture_hash, &key);
         TextureKey *key_out = container_of(found, struct TextureKey, node);
         assert((key_out != NULL) && (key_out->binding != NULL));
+#endif // USE_TEXTURE_LOCATION_CACHE
+
         TextureBinding *binding = key_out->binding;
 
         binding->refcnt++;
@@ -5078,6 +5227,7 @@ static void pgraph_bind_textures(NV2AState *d)
 #else
                     state.width, state.height
 #endif
+                    , !surface_cache[index].color
                     );
 
     #if RES_SCALE_4X
@@ -5725,6 +5875,97 @@ static void upload_gl_texture(GLenum gl_target,
     }
 }
 
+
+
+static void generate_texture_upload(
+    const TextureShape s, 
+    const uint8_t *texture_data,
+    const uint8_t *palette_data,
+    TextureBinding *binding)
+{
+    ColorFormatInfo f = kelvin_color_format_map[s.color_format];
+
+    /* Create a new opengl texture */
+    GLuint gl_texture = binding->gl_texture;
+    GLenum gl_target = binding->gl_target;
+
+    glBindTexture(gl_target, gl_texture);
+
+    if (gl_target == GL_TEXTURE_CUBE_MAP) {
+
+        ColorFormatInfo f = kelvin_color_format_map[s.color_format];
+        unsigned int block_size;
+        if (f.gl_internal_format == GL_COMPRESSED_RGBA_S3TC_DXT1_EXT) {
+            block_size = 8;
+        } else {
+            block_size = 16;
+        }
+
+        size_t length = 0;
+        unsigned int w = s.width, h = s.height;
+        int level;
+        for (level = 0; level < s.levels; level++) {
+            if (f.gl_format == 0) {
+                length += w/4 * h/4 * block_size;
+            } else {
+                length += w * h * f.bytes_per_pixel;
+            }
+
+            w /= 2;
+            h /= 2;
+        }
+
+#if 0
+        if ((f.gl_format == 0) && (s.width == s.height)) {
+            // length += block_size; // 2x2
+            // length += block_size; // 1x1
+            // length += block_size * 2;
+            length = (length + 127) & ~127;
+        } else {
+            // Ensure 64b alignment
+            length = (length + 63) & ~63;
+        }
+#endif
+
+        // FIXME: Addresses https://github.com/xqemu/xqemu/issues/145, needs PR
+        length = (length + 127) & ~127;
+
+        upload_gl_texture(GL_TEXTURE_CUBE_MAP_POSITIVE_X,
+                          s, texture_data + 0 * length, palette_data);
+        upload_gl_texture(GL_TEXTURE_CUBE_MAP_NEGATIVE_X,
+                          s, texture_data + 1 * length, palette_data);
+        upload_gl_texture(GL_TEXTURE_CUBE_MAP_POSITIVE_Y,
+                          s, texture_data + 2 * length, palette_data);
+        upload_gl_texture(GL_TEXTURE_CUBE_MAP_NEGATIVE_Y,
+                          s, texture_data + 3 * length, palette_data);
+        upload_gl_texture(GL_TEXTURE_CUBE_MAP_POSITIVE_Z,
+                          s, texture_data + 4 * length, palette_data);
+        upload_gl_texture(GL_TEXTURE_CUBE_MAP_NEGATIVE_Z,
+                          s, texture_data + 5 * length, palette_data);
+    } else {
+        upload_gl_texture(gl_target, s, texture_data, palette_data);
+    }
+
+    /* Linear textures don't support mipmapping */
+    if (!f.linear) {
+        glTexParameteri(gl_target, GL_TEXTURE_BASE_LEVEL,
+            s.min_mipmap_level);
+        glTexParameteri(gl_target, GL_TEXTURE_MAX_LEVEL,
+            s.levels - 1);
+    }
+
+    if (f.gl_swizzle_mask[0] != 0 || f.gl_swizzle_mask[1] != 0
+        || f.gl_swizzle_mask[2] != 0 || f.gl_swizzle_mask[3] != 0) {
+        glTexParameteriv(gl_target, GL_TEXTURE_SWIZZLE_RGBA,
+                         (const GLint *)f.gl_swizzle_mask);
+    }
+}
+
+
+
+
+
+
 static TextureBinding* generate_texture(const TextureShape s,
                                         const uint8_t *texture_data,
                                         const uint8_t *palette_data)
@@ -5766,6 +6007,7 @@ static TextureBinding* generate_texture(const TextureShape s,
         }
     }
 
+#if 0
     glBindTexture(gl_target, gl_texture);
 
     NV2A_GL_DLABEL(GL_TEXTURE, gl_texture,
@@ -5842,11 +6084,15 @@ static TextureBinding* generate_texture(const TextureShape s,
         glTexParameteriv(gl_target, GL_TEXTURE_SWIZZLE_RGBA,
                          (const GLint *)f.gl_swizzle_mask);
     }
+#endif
 
     TextureBinding* ret = (TextureBinding *)g_malloc(sizeof(TextureBinding));
     ret->gl_target = gl_target;
     ret->gl_texture = gl_texture;
     ret->refcnt = 1;
+
+    generate_texture_upload(s, texture_data, palette_data, ret);
+
     return ret;
 }
 
@@ -5937,6 +6183,150 @@ static void texture_binding_destroy(gpointer data)
     }
 }
 
+#if TRACK_LOCATION_CACHE_STATS
+int loc_cache_hit = 0;
+int loc_cache_miss = 0;
+int loc_cache_false_dirty = 0;
+// QemuSpin loc_cache_stats_lock;
+#endif
+
+static struct lru_node *texture_location_cache_entry_init(struct lru_node *obj, void *key)
+{
+    // Initializing a new location cache entry
+    struct TextureLocationKey *k_out = container_of(obj, struct TextureLocationKey, node);
+    struct TextureLocationKey *k_in = (struct TextureLocationKey *)key;
+
+    memcpy(k_out, k_in, sizeof(struct TextureLocationKey));
+
+    // Lookup in the texture data cache... we may have stored it before
+    // If not, the texture will be created and bound to this location
+
+    TextureKey tc_key = {
+        .state = k_in->state,
+        .texture_data = k_in->texture_data,
+        .palette_data = k_in->palette_data,
+    };
+
+    uint64_t hash = fast_hash(k_in->texture_data, k_in->texture_len, 5003)
+                  ^ fast_hash(k_in->palette_data, k_in->palette_len, 5002);
+
+    struct lru_node *found = lru_lookup(&fuck_fuck_fixme->pgraph.texture_cache, hash, &tc_key);
+    TextureKey *tc_k_out = container_of(found, struct TextureKey, node);
+    assert((tc_k_out != NULL) && (tc_k_out->binding != NULL));
+    k_out->binding = tc_k_out->binding;
+    k_out->hash = hash;
+
+
+#if TRACK_LOCATION_CACHE_STATS
+        loc_cache_miss++;
+#endif
+
+    return obj;
+}
+
+static struct lru_node *texture_location_cache_entry_deinit(struct lru_node *obj)
+{
+    // struct TextureLocationKey *a = container_of(obj, struct TextureLocationKey, node);
+    // fixme: dec refcount on binding?
+
+    return obj;
+}
+
+
+static int texture_location_cache_entry_compare(struct lru_node *obj, void *key)
+{
+
+#define CHECK_FALSE_CLEAN 0 // Check for false clean reports (keep this off for perf)
+    // FIXME: This happens, but pretty rarely and it's not noticable... why? Are
+    // we clearing this range somewhere else?
+
+    struct TextureLocationKey *a = container_of(obj, struct TextureLocationKey, node);
+    struct TextureLocationKey *b = (struct TextureLocationKey *)key;
+
+    if (a->texture_data_offset != b->texture_data_offset) return 1;
+    if (a->texture_len         != b->texture_len) return 1;
+    if (a->palette_data_offset != b->palette_data_offset) return 1;
+    if (a->palette_len         != b->palette_len) return 1;
+
+    int state_equ = memcmp(&a->state, &b->state, sizeof(a->state));
+    if (state_equ) {
+        // State not equal
+        return state_equ;
+    }
+
+#if CHECK_FALSE_CLEAN
+        uint64_t hash = fast_hash(a->texture_data, a->texture_len, 5003)
+                      ^ fast_hash(a->palette_data, a->palette_len, 5002);
+#endif
+
+    // State equal... check to see if the memory was touched
+    bool texture_dirty = memory_region_test_and_clear_dirty(fuck_fuck_fixme->vram,
+        a->texture_data_offset, a->texture_len, DIRTY_MEMORY_VGA);
+
+    if (a->palette_len > 0) {
+        // Check palette too
+        texture_dirty |= memory_region_test_and_clear_dirty(fuck_fuck_fixme->vram,
+            a->palette_data_offset, a->palette_len, DIRTY_MEMORY_VGA);
+    }
+
+    if (!texture_dirty) {
+        // printf("location cache success!\n");
+
+#if CHECK_FALSE_CLEAN // Check for false clean reports (keep this off for perf)
+        if (hash != a->hash) {
+            printf("FALSE REPORT OF CLEAN!\n");
+        }
+#endif
+
+#if TRACK_LOCATION_CACHE_STATS
+        loc_cache_hit++;
+#endif
+
+        return 0;
+    }
+
+    // printf("location cache dirty! hashing texture data...\n");
+
+    // CPU has touched the texture data at this location!
+    // Check texture *data* cache if we have previous data
+
+    TextureKey tc_key = {
+        .state = a->state,
+        .texture_data = a->texture_data,
+        .palette_data = a->palette_data,
+    };
+
+#if !CHECK_FALSE_CLEAN
+    uint64_t hash = fast_hash(a->texture_data, a->texture_len, 5003)
+                  ^ fast_hash(a->palette_data, a->palette_len, 5002);
+#endif
+
+    struct lru_node *found = lru_lookup(&fuck_fuck_fixme->pgraph.texture_cache, hash, &tc_key);
+    TextureKey *key_out = container_of(found, struct TextureKey, node);
+    assert((key_out != NULL) && (key_out->binding != NULL));
+
+    if (a->binding == key_out->binding) {
+        // FALSE REPORT OF DIRTY! (something else on shared page?)
+#if TRACK_LOCATION_CACHE_STATS
+        loc_cache_false_dirty++;
+#endif
+        // printf("--> memory region reported dirty but texture is the same!\n");
+    } else {
+        // Update texture location key with current binding
+        a->binding = key_out->binding;
+        a->hash = hash;
+    }
+    // fixme: dec refcount on old binding?
+
+    return 0;
+}
+
+
+
+
+
+
+
 /* functions for texture LRU cache */
 static struct lru_node *texture_cache_entry_init(struct lru_node *obj, void *key)
 {
@@ -5946,6 +6336,9 @@ static struct lru_node *texture_cache_entry_init(struct lru_node *obj, void *key
     k_out->binding = generate_texture(k_in->state,
                                       k_in->texture_data,
                                       k_in->palette_data);
+
+    // k_out->data_hash = fast_hash(k_in->texture_data, k_in->texture_len, 5003)
+    //                  ^ fnv_hash(k_in->palette_data, k_in->palette_len);
     return obj;
 }
 
@@ -5961,6 +6354,54 @@ static int texture_cache_entry_compare(struct lru_node *obj, void *key)
     struct TextureKey *a = container_of(obj, struct TextureKey, node);
     struct TextureKey *b = (struct TextureKey *)key;
     return memcmp(&a->state, &b->state, sizeof(a->state));
+
+#if 0
+    if (a->texture_data_offset != b->texture_data_offset) return 1;
+    if (a->texture_len         != b->texture_len) return 1;
+    if (a->palette_data_offset != b->palette_data_offset) return 1;
+    if (a->palette_len         != b->palette_len) return 1;
+
+    int state_equ = memcmp(&a->state, &b->state, sizeof(a->state));
+    if (state_equ) {
+        // State not equal
+        return state_equ;
+    }
+
+    // State equal... check to see if the memory was touched
+    bool texture_dirty = memory_region_test_and_clear_dirty(fuck_fuck_fixme->vram,
+        a->texture_data_offset, a->texture_len, DIRTY_MEMORY_VGA);
+
+    if (a->palette_len > 0) {
+        // Check palette too
+        texture_dirty |= memory_region_test_and_clear_dirty(fuck_fuck_fixme->vram,
+            a->palette_data_offset, a->palette_len, DIRTY_MEMORY_VGA);
+    }
+
+
+    uint64_t hash = fast_hash(a->texture_data, a->texture_len, 5003)
+                     ^ fnv_hash(a->palette_data, a->palette_len);
+
+    if (!texture_dirty) {
+        // if (a->data_hash != hash) {
+        //     printf("hash does not agree with memory! %016x v %016x\n", a->data_hash, hash);
+        // }
+
+        return 0;
+    }
+
+        // CPU touched the texture, re-upload it
+        // [or return 1 here and let the LRU just create a new entry ---
+        // cpu could ping-pong and we'd be better off hashing in that case as a fallback]
+        #if 1
+        printf("re-uploading!\n");
+        generate_texture_upload(a->state, a->texture_data, a->palette_data, a->binding);
+        #else
+        printf("dirty.. should create!\n");
+        return 1;
+        #endif
+
+    return 0;
+#endif
 }
 
 /* hash and equality for shader cache hash table */

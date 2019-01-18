@@ -171,6 +171,9 @@ void xbox_pci_init(qemu_irq *pic,
     bridge_state->pci_address_space = pci_memory;
     bridge_state->system_memory = address_space_mem;
 
+    // pc_pci_as_mapping_init(OBJECT(bridge_state), bridge_state->system_memory,
+    //                        bridge_state->pci_address_space);
+
     /* PCI hole */
     /* TODO: move to xbox-pci init */
     memory_region_init_alias(&bridge_state->pci_hole, OBJECT(bridge),

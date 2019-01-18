@@ -570,7 +570,7 @@ static QString* psh_convert(struct PixelShader *ps)
         }
     } else if (ps->state.window_clip_exclusive) {
         /* Clip everything */
-        qstring_append(clip, "discard;\n");
+        // qstring_append(clip, "discard;\n");
     }
 
     /* calculate perspective-correct inputs */

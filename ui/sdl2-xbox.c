@@ -90,6 +90,10 @@ static void sdl2_set_scanout_mode(struct sdl2_console *scon, bool scanout)
 }
 #endif
 
+extern int loc_cache_hit;
+extern int loc_cache_miss;
+extern int loc_cache_false_dirty;
+
 static void sdl2_gl_render_surface(struct sdl2_console *scon)
 {
     int ww, wh;
@@ -152,6 +156,20 @@ static void sdl2_gl_render_surface(struct sdl2_console *scon)
                 extern int shader_bindings;
                 printf("Shader Bindings: %d\n", shader_bindings);
                 shader_bindings = 0;
+
+#if TRACK_LOCATION_CACHE_STATS
+                int total = loc_cache_hit + loc_cache_miss;
+
+                printf("[Loc Cache] Hit:%d, Miss:%d, False Miss:%d --> %.2f%%\n",
+                    loc_cache_hit,
+                    loc_cache_miss,
+                    loc_cache_false_dirty,
+                    total > 0 ? (float)(loc_cache_hit-loc_cache_false_dirty)/(float)total*100.0 : 0.0
+                    );
+                loc_cache_hit = 0;
+                loc_cache_miss = 0;
+                loc_cache_false_dirty = 0;
+#endif
             }
             frames++;
 #endif

@@ -179,6 +179,8 @@ static inline tcg_target_ulong cpu_tb_exec(CPUState *cpu, TranslationBlock *itb)
          * counter hit zero); we must restore the guest PC to the address
          * of the start of the TB.
          */
+        // printf("exit_eip:%08x\n", last_tb->pc);
+
         CPUClass *cc = CPU_GET_CLASS(cpu);
         qemu_log_mask_and_addr(CPU_LOG_EXEC, last_tb->pc,
                                "Stopped execution of TB chain before %p ["
@@ -220,6 +222,7 @@ static void cpu_exec_nocache(CPUState *cpu, int max_cycles,
 
     /* execute the generated code */
     trace_exec_tb_nocache(tb, tb->pc);
+    // printf("start_eip:%08x\n", tb->pc);
     cpu_tb_exec(cpu, tb);
 
     mmap_lock();
@@ -256,6 +259,7 @@ void cpu_exec_step_atomic(CPUState *cpu)
         cc->cpu_exec_enter(cpu);
         /* execute the generated code */
         trace_exec_tb(tb, pc);
+        // printf("start_eip:%08x\n", pc);
         cpu_tb_exec(cpu, tb);
         cc->cpu_exec_exit(cpu);
     } else {
@@ -609,6 +613,7 @@ static inline void cpu_loop_exec_tb(CPUState *cpu, TranslationBlock *tb,
     int32_t insns_left;
 
     trace_exec_tb(tb, tb->pc);
+    // printf("start_eip:%08x\n", tb->pc);
     ret = cpu_tb_exec(cpu, tb);
     tb = (TranslationBlock *)(ret & ~TB_EXIT_MASK);
     *tb_exit = ret & TB_EXIT_MASK;

@@ -29,7 +29,9 @@
 #include "hw/qdev.h"
 #include "hw/isa/isa.h"
 
-#define PIT_FREQ 1193182
+// #define PIT_FREQ 1193182
+#define PIT_FREQ 1175000
+// #define PIT_FREQ    1775000
 
 typedef struct PITChannelInfo {
     int gate;

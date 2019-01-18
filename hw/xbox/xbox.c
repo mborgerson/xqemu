@@ -56,16 +56,15 @@
 #include "xbox_pci.h"
 #include "smbus.h"
 
-<<<<<<< HEAD
 #include "hw/xbox/xbox_pci.h"
 #include "hw/xbox/smbus.h"
 #include "hw/xbox/nv2a/nv2a.h"
  
 #include "hw/xbox/xbox.h"
-=======
+
 #include "qemu/option.h"
 #include "xbox.h"
->>>>>>> parent of 3ee213e59a... cleanup xbox.c
+
 
 #define MAX_IDE_BUS 2
 
@@ -355,7 +354,7 @@ void xbox_init_common(MachineState *machine,
     memory_region_init(pci_memory, NULL, "pci", UINT64_MAX);
     rom_memory = pci_memory;
 
-    pc_guest_info_init(pcms);
+    // pc_guest_info_init(pcms);
 
     /* allocate ram and load rom/bios */
     xbox_memory_init(pcms, system_memory, rom_memory, &ram_memory);
@@ -375,13 +374,13 @@ void xbox_init_common(MachineState *machine,
 
     isa_bus_irqs(isa_bus, pcms->gsi);
 
-    // if (kvm_pic_in_kernel()) {
-    //     i8259 = kvm_i8259_init(isa_bus);
-    // } else if (xen_enabled()) {
-    //     i8259 = xen_interrupt_controller_init();
-    // } else {
+    if (kvm_pic_in_kernel()) {
+        i8259 = kvm_i8259_init(isa_bus);
+    } else if (xen_enabled()) {
+        i8259 = xen_interrupt_controller_init();
+    } else {
         i8259 = i8259_init(isa_bus, pc_allocate_cpu_irq());
-    // }
+    }
 
     for (i = 0; i < ISA_NUM_IRQS; i++) {
         gsi_state->i8259_irq[i] = i8259[i];
@@ -389,7 +388,7 @@ void xbox_init_common(MachineState *machine,
     g_free(i8259);
 
     // if (pcmc->pci_enabled) {
-    //     ioapic_init_gsi(gsi_state, "i440fx");
+    //     ioapic_init_gsi(gsi_state, NULL);//, "i440fx");
     // }
 
     pc_register_ferr_irq(pcms->gsi[13]);
@@ -450,8 +449,6 @@ void xbox_init_common(MachineState *machine,
     //         idebus[i] = qdev_get_child_bus(DEVICE(dev), busname);
     //     }
     // }
-
-    pc_cmos_init(pcms, idebus[0], idebus[1], rtc_state);
 
     // xbox bios wants this bit pattern set to mark the data as valid
     uint8_t bits = 0x55;
@@ -520,7 +517,7 @@ static void xbox_machine_options(MachineClass *m)
     m->no_floppy         = 1,
     m->no_cdrom          = 1,
     m->no_sdcard         = 1,
-    m->default_cpu_type  = X86_CPU_TYPE_NAME("486");
+    m->default_cpu_type  = X86_CPU_TYPE_NAME("pentium3");
 
     pcmc->pci_enabled         = true;
     pcmc->has_acpi_build      = false;
@@ -529,6 +526,7 @@ static void xbox_machine_options(MachineClass *m)
     pcmc->smbios_legacy_mode  = true;
     pcmc->has_reserved_memory = false;
     pcmc->default_nic_model   = "nvnet";
+    pcmc->kvmclock_enabled = true;
 }
 
 static char *machine_get_bootrom(Object *obj, Error **errp)

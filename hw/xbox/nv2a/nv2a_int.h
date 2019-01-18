@@ -142,6 +142,19 @@ typedef struct TextureBinding {
     unsigned int refcnt;
 } TextureBinding;
 
+typedef struct TextureLocationKey {
+    struct lru_node node;
+    TextureShape state;
+    hwaddr texture_data_offset;
+    size_t texture_len;
+    hwaddr palette_data_offset;
+    size_t palette_len;
+    uint8_t *texture_data;
+    uint8_t *palette_data;
+    TextureBinding *binding;
+    uint64_t hash;
+} TextureLocationKey;
+
 typedef struct TextureKey {
     struct lru_node node;
     TextureShape state;
@@ -218,6 +231,10 @@ typedef struct PGRAPHState {
     struct TextureKey *texture_cache_entries;
     bool texture_dirty[NV2A_MAX_TEXTURES];
     TextureBinding *texture_binding[NV2A_MAX_TEXTURES];
+
+    // experimental caching of texture location
+    struct lru texture_location_cache;
+    struct TextureLocationKey *texture_location_cache_entries;
 
 
     struct lru inline_array_cache;
