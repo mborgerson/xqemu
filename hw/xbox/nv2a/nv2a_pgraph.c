@@ -61,7 +61,7 @@ int frame_timer_started = 0;
 
 static void start_frame_timer()
 {
-#if 0
+#if 1
     if (frame_timer_started) return;
     gettimeofday(&frame_timer_start, NULL);
     frame_timer_started = 1;
@@ -72,7 +72,7 @@ int i = 0;
 
 static void stop_frame_timer()
 {
-#if 0
+#if 1
     if (!frame_timer_started) return;
     struct timeval tv_now, tv_since_start;
     gettimeofday(&tv_now, NULL);
@@ -826,7 +826,7 @@ static void pgraph_method(NV2AState *d,
             NV2A_DPRINTF("  - 0x%tx -> 0x%tx\n", source - d->vram_ptr,
                                                  dest - d->vram_ptr);
 
-#if 0 //RENDER_TO_TEXTURE
+#if RENDER_TO_TEXTURE
 
             // Create new surface at dest and put it in surface cache
             if (source - d->vram_ptr == pg->gl_color_buffer_offset) {
@@ -840,6 +840,7 @@ static void pgraph_method(NV2AState *d,
                 glBindTexture(GL_TEXTURE_2D, gl_buf);
                 glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
                 glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 
                 SurfaceColorFormatInfo f =
                     kelvin_surface_color_format_map[pg->surface_shape.color_format];
@@ -1071,7 +1072,7 @@ static void pgraph_method(NV2AState *d,
 
 
         // print_timestamp();
-        // printf("FRAME COMPLETE\n");
+        printf("FRAME COMPLETE\n");
 
         stop_frame_timer();
 
@@ -2936,7 +2937,7 @@ glo_set_current(pg->gl_context);
 
 
                 // print_timestamp();
-                // printf("HALO CLEAR\n");
+                printf("HALO CLEAR\n");
                 start_frame_timer();
 
             }
@@ -3066,6 +3067,12 @@ glo_set_current(pg->gl_context);
         }
 
         glClear(gl_mask);
+
+
+            // Safe for dash?
+                // printf("HALO CLEAR\n");
+                start_frame_timer();
+
 
         glDisable(GL_SCISSOR_TEST);
 
@@ -3295,25 +3302,23 @@ static void pgraph_finish_inline_buffer_vertex(PGRAPHState *pg)
 // Via https://rauwendaal.net/2014/06/14/rendering-a-screen-covering-triangle-in-opengl/
 static const char *vert_shader_src =
     "#version 150 core\n"
-    "out vec2 texCoord;\n"
     "void main()\n"
     "{\n"
     "    float x = -1.0 + float((gl_VertexID & 1) << 2);\n"
     "    float y = -1.0 + float((gl_VertexID & 2) << 1);\n"
-    "    texCoord.x = (x+1.0)*0.5;\n"
-    "    texCoord.y = 1.0-(y+1.0)*0.5;\n"
     "    gl_Position = vec4(x, y, 0, 1);\n"
     "}\n";
 
 static const char *frag_shader_src =
     "#version 150 core\n"
-    "in vec2 texCoord;\n"
     "out vec4 out_Color;\n"
     "uniform sampler2D tex;\n"
     "uniform usampler2D utex;\n"
     "uniform int is_stencil;\n"
     "void main()\n"
     "{\n"
+        "vec2 texCoord = gl_FragCoord.xy/textureSize(tex,0).xy;\n"
+        "texCoord.y = 1.0 - texCoord.y;\n"
         // "if (is_stencil > 0) {\n"
         // "  float val = float(texture(utex, texCoord).r)/255.0;\n"
         // "  out_Color.rgba = vec4(0,0,val,0);\n"
@@ -3403,9 +3408,10 @@ static void pgraph_render_surface_to_texture(
     GLboolean m_cull;
     GLboolean m_depth_test;
 
-    GLint m_active_texture = 0;
+    // We come in with the final texture unit activated
+    GLint m_final_texture_unit = 0;
+    glGetIntegerv(GL_ACTIVE_TEXTURE, &m_final_texture_unit);
 
-    // glGetIntegerv(GL_ACTIVE_TEXTURE, &m_active_texture);
     glGetIntegerv(GL_VIEWPORT, m_viewport);
     glGetBooleanv(GL_COLOR_WRITEMASK, m_color_mask);
     m_scissor_test = glIsEnabled(GL_SCISSOR_TEST);
@@ -3422,18 +3428,19 @@ static void pgraph_render_surface_to_texture(
 
     // Bind destination texture as framebuffer color attachment
     glBindTexture(dst_target, dst);
-
     // Reallocate space for new texture dimensions
+    glTexParameteri(dst_target, GL_TEXTURE_BASE_LEVEL, 0);
+    glTexParameteri(dst_target, GL_TEXTURE_MAX_LEVEL, 0);
+    glTexParameteri(dst_target, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexImage2D(dst_target, 0, f.gl_internal_format,
         width, height, 0, f.gl_format, f.gl_type, NULL);
-
-    glTexParameteri(dst_target, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(dst_target, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    // glTexParameteri(dst_target, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
     // Attach the texture to the framebuffer
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, dst_target, dst, 0);
     GLenum DrawBuffers[1] = {GL_COLOR_ATTACHMENT0};
     glDrawBuffers(1, DrawBuffers);
+
     assert(glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE);
 
     // Bind the new framebuffer
@@ -3442,16 +3449,13 @@ static void pgraph_render_surface_to_texture(
     // Set up viewport to prevent clipping
     glViewport(0, 0, width, height);
 
+    glBindTexture(GL_TEXTURE_RECTANGLE, 0);
+
     // Bind surface as source texture, and a dummy vao for rendering the full screen triangle
-    glActiveTexture(GL_TEXTURE0);
-
-
-    // get texture bound here before so we can bind it again after
-    GLint m_tex0_bound;
-    glGetIntegerv(GL_TEXTURE_BINDING_2D, &m_tex0_bound);
-
-
     glBindTexture(GL_TEXTURE_2D, src);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+
     glBindVertexArray(d->pgraph.r2t.m_vao);
     glBindBuffer(GL_ARRAY_BUFFER, d->pgraph.r2t.m_vbo);
     glUseProgram(d->pgraph.r2t.m_shader_prog);
@@ -3464,29 +3468,21 @@ static void pgraph_render_surface_to_texture(
     }
 
     // assign current texture unit
-    glProgramUniform1i(d->pgraph.r2t.m_shader_prog, texture_bound_location, 0);//m_active_texture);
-    glProgramUniform1i(d->pgraph.r2t.m_shader_prog, utex_loc, 0);//m_active_texture);
+    glProgramUniform1i(d->pgraph.r2t.m_shader_prog, texture_bound_location, m_final_texture_unit-GL_TEXTURE0);
+    // glProgramUniform1i(d->pgraph.r2t.m_shader_prog, utex_loc, m_final_texture_unit-GL_TEXTURE0);
     glProgramUniform1i(d->pgraph.r2t.m_shader_prog, is_stencil_uni, src_zeta);
 
     // Render
     glColorMask(true, true, true, true);
     if (m_scissor_test) glDisable(GL_SCISSOR_TEST);
-    if (m_blend) glDisable(GL_BLEND);
+    if (m_blend)        glDisable(GL_BLEND);
     if (m_stencil_test) glDisable(GL_STENCIL_TEST);
-    if (m_cull) glDisable(GL_CULL_FACE);
-    if (m_depth_test) glDisable(GL_DEPTH_TEST);
+    if (m_cull)         glDisable(GL_CULL_FACE);
+    if (m_depth_test)   glDisable(GL_DEPTH_TEST);
 
     glClearColor(0.0f, 0.0f, 1.0f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT);
     glDrawArrays(GL_TRIANGLES, 0, 3);
-
-
-    // rebind old tex0
-    // glActiveTexture(GL_TEXTURE0);
-    // if (m_tex0_bound) {
-    //     glBindTexture(GL_TEXTURE_2D, m_tex0_bound);
-    // }
-    // glActiveTexture(m_active_texture);
 
     // Restore state saved on stack, framebuffer/vertex arrays/etc
     glBindFramebuffer(GL_FRAMEBUFFER, d->pgraph.gl_framebuffer);
@@ -3495,6 +3491,7 @@ static void pgraph_render_surface_to_texture(
         glBindTexture(d->pgraph.texture_binding[0]->gl_target,
                       d->pgraph.texture_binding[0]->gl_texture);
     }
+
 #if 0
     glUseProgram(d->pgraph.shader_binding->gl_program);
 #else
@@ -3507,11 +3504,12 @@ static void pgraph_render_surface_to_texture(
     glViewport(m_viewport[0], m_viewport[1], m_viewport[2], m_viewport[3]);
     glColorMask(m_color_mask[0], m_color_mask[1], m_color_mask[2], m_color_mask[3]);
     if (m_scissor_test) glEnable(GL_SCISSOR_TEST);
-    if (m_blend) glEnable(GL_BLEND);
+    if (m_blend)        glEnable(GL_BLEND);
     if (m_stencil_test) glEnable(GL_STENCIL_TEST);
-    if (m_cull) glEnable(GL_CULL_FACE);
-    if (m_depth_test) glEnable(GL_DEPTH_TEST);
+    if (m_cull)         glEnable(GL_CULL_FACE);
+    if (m_depth_test)   glEnable(GL_DEPTH_TEST);
 
+    // Bind dest texture to output unit
     glBindTexture(dst_target, dst);
 
 #else
@@ -3573,10 +3571,9 @@ static void pgraph_init(NV2AState *d)
     /* need a valid framebuffer to start with */
     glGenTextures(1, &pg->gl_color_buffer);
     glBindTexture(GL_TEXTURE_2D, pg->gl_color_buffer);
-
-
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8,
 #if RES_SCALE_4X
@@ -4648,6 +4645,7 @@ static void pgraph_update_surface_part(NV2AState *d, bool upload, bool color) {
 
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 
         /* This is VRAM so we can't do this inplace! */
 #if !USE_SHARED_CONTEXT // FIXME: Just skipping all uploads of surfaces rn
@@ -5294,7 +5292,7 @@ static void pgraph_bind_textures(NV2AState *d)
             pgraph_texture_addr_map[addru]);
         if (dimensionality > 1) {
             assert(addrv < ARRAY_SIZE(pgraph_texture_addr_map));
-            glTexParameteri(binding->gl_target, GL_TEXTURE_WRAP_T,
+        glTexParameteri(binding->gl_target, GL_TEXTURE_WRAP_T,
                 pgraph_texture_addr_map[addrv]);
         }
         if (dimensionality > 2) {
