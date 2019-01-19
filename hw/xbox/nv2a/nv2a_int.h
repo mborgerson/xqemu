@@ -37,13 +37,18 @@
 #include "hw/xbox/nv2a/nv2a_shaders.h"
 #include "hw/xbox/nv2a/nv2a_debug.h"
 #include "hw/xbox/nv2a/nv2a_regs.h"
+#include "hw/xbox/nv2a/nv2a_regs_mask.h"
 
 #include "perf_config.h"
 
 #define CRPRINTF(...)
 
 
-#define GET_MASK(v, mask) (((v) & (mask)) >> ctz32(mask))
+#define GET_MASK_SLOW(v, mask) (((v) & (mask)) >> ctz32(mask))
+
+// #define GET_MASK_(v, mask) 
+#define GET_MASK(v, mask) (((v) & (mask)) >> (mask ## _MASK))
+// #define GET_MASK(v, mask) GET_MASK_SLOW(v, mask)
 
 #define SET_MASK(v, mask, val)                            \
     ({                                                    \

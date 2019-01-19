@@ -212,7 +212,7 @@ static void pfifo_run_puller(NV2AState *d)
                 //qemu_mutex_unlock_iothread();
             }
 
-            enum FIFOEngine engine = GET_MASK(*engine_reg, 3 << (4*subchannel));
+            enum FIFOEngine engine = GET_MASK_SLOW(*engine_reg, 3 << (4*subchannel));
             // NV2A_DPRINTF("engine_reg2 %d 0x%x\n", subchannel, *engine_reg);
             assert(engine == ENGINE_GRAPHICS);
             SET_MASK(*pull1, NV_PFIFO_CACHE1_PULL1_ENGINE, engine);

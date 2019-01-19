@@ -133,14 +133,15 @@ static void sdl2_gl_render_surface(struct sdl2_console *scon)
             glClear(GL_COLOR_BUFFER_BIT);
             glDrawArrays(GL_TRIANGLES, 0, 3);
 
-            flip_sync = glFenceSync( GL_SYNC_GPU_COMMANDS_COMPLETE, 0 );
-
-
+            // flip_sync = glFenceSync( GL_SYNC_GPU_COMMANDS_COMPLETE, 0 );
+#if 0
         qemu_spin_lock(&avail_spinner);
         // display_tex = fb_tex;
         // fence = fb_sync;
         available = 0; // <--
         qemu_spin_unlock(&avail_spinner);
+#endif
+            glBindTexture(GL_TEXTURE_2D, 0);
 
             SDL_GL_SwapWindow(scon->real_window);
 

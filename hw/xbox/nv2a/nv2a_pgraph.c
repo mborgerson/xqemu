@@ -33,7 +33,6 @@
 #define TDPRINTF(...)
 #endif
 
-
 struct timeval tv_start;
 int tv_start_valid = 0;
 
@@ -1072,7 +1071,7 @@ static void pgraph_method(NV2AState *d,
 
 
         // print_timestamp();
-        printf("FRAME COMPLETE\n");
+        // printf("FRAME COMPLETE\n");
 
         stop_frame_timer();
 
@@ -2937,8 +2936,8 @@ glo_set_current(pg->gl_context);
 
 
                 // print_timestamp();
-                printf("HALO CLEAR\n");
-                start_frame_timer();
+                // printf("HALO CLEAR\n");
+                // start_frame_timer();
 
             }
             if (parameter & NV097_CLEAR_SURFACE_STENCIL) {
@@ -4084,7 +4083,7 @@ static void pgraph_bind_shaders(PGRAPHState *pg)
                 (i % 2) ? NV_PGRAPH_CSV1_A_T1_R : NV_PGRAPH_CSV1_A_T0_R,
                 (i % 2) ? NV_PGRAPH_CSV1_A_T1_Q : NV_PGRAPH_CSV1_A_T0_Q
             };
-            state.texgen[i][j] = (enum VshTexgen)GET_MASK(pg->regs[reg], masks[j]);
+            state.texgen[i][j] = (enum VshTexgen)GET_MASK_SLOW(pg->regs[reg], masks[j]);
         }
     }
 
@@ -4111,7 +4110,7 @@ static void pgraph_bind_shaders(PGRAPHState *pg)
     /* Lighting */
     if (state.lighting) {
         for (i = 0; i < NV2A_MAX_LIGHTS; i++) {
-            state.light[i] = (enum VshLight)GET_MASK(pg->regs[NV_PGRAPH_CSV0_D],
+            state.light[i] = (enum VshLight)GET_MASK_SLOW(pg->regs[NV_PGRAPH_CSV0_D],
                                       NV_PGRAPH_CSV0_D_LIGHT0 << (i * 2));
         }
     }
