@@ -45,5 +45,6 @@
 // Bypass parts of the FIFO state machine to fast upload indices
 // Massive performance improvement in some cases.
 #define FAST_ARRAY_ELEMENT16_UPLOAD 1
+#define FAST_SET_TRANSFORM_CONSTANT 1
 
 #endif

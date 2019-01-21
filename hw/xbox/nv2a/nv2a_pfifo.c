@@ -454,6 +454,94 @@ static void pfifo_run_pusher(NV2AState *d)
                     NV2A_DPRINTF("pb RET 0x%x\n", dma_get_v);
                 }
             } else if ((word & 0xe0030003) == 0) {
+#if FAST_SET_TRANSFORM_CONSTANT
+                //
+                // Hacky shortcut to fast set transform constants:
+                //
+                const int hack_method = (word & 0x1fff);
+                struct PGRAPHState *pg = &d->pgraph;
+                if (hack_method == NV097_SET_TRANSFORM_CONSTANT) {
+
+                    // Make sure all queued methods have been executed
+                    while ((*status & NV_PFIFO_CACHE1_STATUS_LOW_MARK) == 0) {
+                        // printf("waiting for puller to finish\n");
+                        puller_cond = 1;
+                        qemu_coroutine_yield();
+                    }
+                    
+                    uint32_t graphics_class = GET_MASK(pg->regs[NV_PGRAPH_CTX_SWITCH1],
+                                                       NV_PGRAPH_CTX_SWITCH1_GRCLASS);
+                    int hack_count = (word >> 18) & 0x7ff;
+                    assert(graphics_class == NV_KELVIN_PRIMITIVE);
+                    assert((dma_put_v-dma_get_v) >= (hack_count*4));
+
+                    // Bulk upload these constants
+                    int slot;
+                    for (slot = 0; slot < hack_count; slot++) {
+                        uint32_t param = ldl_le_p((uint32_t*)(dma + dma_get_v));
+                        //////////////////////////////////////////////////////////////////
+                        // Copy-paste from pgraph.c
+                        int const_load = GET_MASK(pg->regs[NV_PGRAPH_CHEOPS_OFFSET],
+                                                  NV_PGRAPH_CHEOPS_OFFSET_CONST_LD_PTR);
+                        assert(const_load < NV2A_VERTEXSHADER_CONSTANTS);
+                        // VertexShaderConstant *constant = &pg->constants[const_load];
+                        pg->vsh_constants_dirty[const_load] |=
+                            (param != pg->vsh_constants[const_load][slot%4]);
+                        pg->vsh_constants[const_load][slot%4] = param;
+                        if (slot % 4 == 3) {
+                            SET_MASK(pg->regs[NV_PGRAPH_CHEOPS_OFFSET],
+                                     NV_PGRAPH_CHEOPS_OFFSET_CONST_LD_PTR, const_load+1);
+                        }
+                        //////////////////////////////////////////////////////////////////
+                        dma_get_v += 4;
+                    }
+                }
+
+
+
+
+                else if (hack_method == NV097_SET_VERTEX_DATA2F_M) {
+                    // Make sure all queued methods have been executed
+                    while ((*status & NV_PFIFO_CACHE1_STATUS_LOW_MARK) == 0) {
+                        // printf("waiting for puller to finish\n");
+                        puller_cond = 1;
+                        qemu_coroutine_yield();
+                    }
+                    
+                    uint32_t graphics_class = GET_MASK(pg->regs[NV_PGRAPH_CTX_SWITCH1],
+                                                       NV_PGRAPH_CTX_SWITCH1_GRCLASS);
+                    int hack_count = (word >> 18) & 0x7ff;
+                    assert(graphics_class == NV_KELVIN_PRIMITIVE);
+                    assert((dma_put_v-dma_get_v) >= (hack_count*4));
+
+                    // Bulk upload these constants
+                    int islot;
+                    for (islot = 0; islot < hack_count; islot++) {
+                        int slot = islot;
+                        uint32_t param = ldl_le_p((uint32_t*)(dma + dma_get_v));
+                        //////////////////////////////////////////////////////////////////
+                        // Copy-paste from pgraph.c
+                        unsigned int part = slot % 2;
+                        slot /= 2;
+                        VertexAttribute *attribute = &pg->vertex_attributes[slot];
+                        pgraph_allocate_inline_buffer_vertices(pg, slot);
+                        attribute->inline_value[part] = *(float*)&param;
+                        /* FIXME: Should these really be set to 0.0 and 1.0 ? Conditions? */
+                        attribute->inline_value[2] = 0.0;
+                        attribute->inline_value[3] = 1.0;
+                        if ((slot == 0) && (part == 1)) {
+                            pgraph_finish_inline_buffer_vertex(pg);
+                        }
+                        //////////////////////////////////////////////////////////////////
+                        dma_get_v += 4;
+                    }
+                }
+
+
+
+                else {
+#endif
+
                 /* increasing methods */
                 SET_MASK(*dma_state, NV_PFIFO_CACHE1_DMA_STATE_METHOD,
                          (word & 0x1fff) >> 2 );
@@ -463,6 +551,11 @@ static void pfifo_run_pusher(NV2AState *d)
                          (word >> 18) & 0x7ff);
                 SET_MASK(*dma_state, NV_PFIFO_CACHE1_DMA_STATE_METHOD_TYPE,
                          NV_PFIFO_CACHE1_DMA_STATE_METHOD_TYPE_INC);
+
+#if FAST_SET_TRANSFORM_CONSTANT
+                }
+#endif
+
                 *dma_dcount = 0;
             } else if ((word & 0xe0030003) == 0x40000000) {
 #if FAST_ARRAY_ELEMENT16_UPLOAD
@@ -476,6 +569,12 @@ static void pfifo_run_pusher(NV2AState *d)
                 const int hack_method = (word & 0x1fff);
                 struct PGRAPHState *pg = &d->pgraph;
                 if (hack_method == NV097_ARRAY_ELEMENT16) {
+                    // Make sure all queued methods have been executed
+                    while ((*status & NV_PFIFO_CACHE1_STATUS_LOW_MARK) == 0) {
+                        // printf("waiting for puller to finish\n");
+                        puller_cond = 1;
+                        qemu_coroutine_yield();
+                    }
                     uint32_t graphics_class = GET_MASK(pg->regs[NV_PGRAPH_CTX_SWITCH1],
                                                        NV_PGRAPH_CTX_SWITCH1_GRCLASS);
                     int hack_count = (word >> 18) & 0x7ff;
@@ -484,12 +583,6 @@ static void pfifo_run_pusher(NV2AState *d)
 
                     // printf("element 16 x %d!\n", hack_count);
 
-                    // Make sure all queued methods have been executed
-                    while ((*status & NV_PFIFO_CACHE1_STATUS_LOW_MARK) == 0) {
-                        // printf("waiting for puller to finish\n");
-                        puller_cond = 1;
-                        qemu_coroutine_yield();
-                    }
 
                     // Bulk upload these inline indices
                     int count_index;
