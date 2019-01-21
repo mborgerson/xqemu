@@ -4,11 +4,12 @@
 // Profiling helpers
 #define PROFILE_SURFACES 0
 #define PROFILE_TEXTURES 0
+#define PROFILE_FLIP 0
 
 // Try to avoid re-uploading textures again and again by keeping them in GPU
 // memory and identifying them using a fast hashing method.
 #define USE_TEXTURE_CACHE 1
-#define USE_TEXTURE_LOCATION_CACHE 1
+#define USE_TEXTURE_LOCATION_CACHE 1 // FIXME: Need to debug issue with double free
 #define TRACK_LOCATION_CACHE_STATS 0
 
 // Similar to the texture cache, try to avoid uploading geometry when possible
@@ -24,7 +25,7 @@
 #define USE_COROUTINES 1
 
 // Enable 4x surface rendering
-#define RES_SCALE_4X 0
+#define RES_SCALE_4X 1
 
 // Instead of writing surfaces out to memory...
 // - Hold on to them in a cache as they are likely to be re-used (don't re-upload)
@@ -40,13 +41,10 @@
 // is used where a new framebuffer is bound with the destination texture as
 // the color attachment and the surface is rendered into the framebuffer with
 // a shader that flips it upside down.
-#define RENDER_TO_TEXTURE_COPY 1
+#define RENDER_TO_TEXTURE_COPY 0
 
-#define PROFILE_FLIP 0
-
-// Bypass parts of the FIFO state machine to fast upload indices
+// Bypass parts of the FIFO state machine to faster bulk uploads
 // Massive performance improvement in some cases.
-#define FAST_ARRAY_ELEMENT16_UPLOAD 0
-#define FAST_SET_TRANSFORM_CONSTANT 0
+#define FIFO_SHORTCUT 1
 
 #endif

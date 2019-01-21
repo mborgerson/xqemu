@@ -31,7 +31,7 @@ void track_pgraph_method(unsigned int subchannel,
                    unsigned int method,
                    uint32_t parameter)
 {
-#if 1
+#if 0
     assert(method < 0x2000);
     method_track[method]++;
 #endif
@@ -170,7 +170,7 @@ int uboce_key_compare(struct lru_node *obj, void *key);
  *
  */
 
-int surface_cache_find(hwaddr addr);
+int surface_cache_find(hwaddr addr, int color);
 int surface_cache_retire(int index);
 int surface_cache_store(hwaddr addr);
 
@@ -185,12 +185,13 @@ struct surface_cache_slot {
     int color;
 } surface_cache[SURFACE_CACHE_SLOTS];
 
-int surface_cache_find(hwaddr addr)
+int surface_cache_find(hwaddr addr, int color)
 {
     int i;
     for (i = 0; i < SURFACE_CACHE_SLOTS; i++) {
         if (surface_cache[i].valid &&
-            surface_cache[i].addr == addr) {
+            surface_cache[i].addr == addr &&
+            surface_cache[i].color == color) {
             return i;
         }
     }
@@ -206,7 +207,7 @@ int surface_cache_retire(int index)
 
 int surface_cache_store(hwaddr addr)
 {
-    int i = surface_cache_find(addr);
+    int i = surface_cache_find(addr, 1);
 
     if (i < 0) {
         // Find a free slot
@@ -1082,7 +1083,7 @@ static void pgraph_method(NV2AState *d,
         GLuint fb_tex_tmp;
         SDPRINTF("frame: crt = %08lx\n", d->pcrtc.start);
         SDPRINTF("       color offset = %08lx\n", pg->gl_color_buffer_offset);
-        int index = surface_cache_find(d->pcrtc.start);
+        int index = surface_cache_find(d->pcrtc.start, 1);
 
         if (index > 0) {
             NV2A_GL_DPRINTF(true, "Found GL buf! Making frame available (%d)", surface_cache[index].buf_id);
@@ -4639,7 +4640,7 @@ static void pgraph_update_surface_part(NV2AState *d, bool upload, bool color) {
 
         // Look in surface cache for this buffer
 #if USE_SHARED_CONTEXT
-        int index = surface_cache_find(surface->offset);
+        int index = surface_cache_find(surface->offset, color);
 
         // Verify surface shape
         if (index >= 0) {
@@ -4651,6 +4652,20 @@ static void pgraph_update_surface_part(NV2AState *d, bool upload, bool color) {
                 index = -1;
             } else {
                 SDPRINTF("Shapes match!\n");
+            }
+        }
+
+        // hmm
+        if (index > 0) {
+            if (color == surface_cache[index].color) {
+                // Should be compatible
+            } else {
+                printf("Tried to load %s surface, wanted %s\n",
+                    surface_cache[index].color ? "color" : "zeta", 
+                    color ? "color" : "zeta");
+                glDeleteTextures(1, &surface_cache[index].buf_id);
+                surface_cache_retire(index);
+                index = -1;
             }
         }
 
@@ -5251,7 +5266,7 @@ static void pgraph_bind_textures(NV2AState *d)
 
         // printf("tex %d = %08x (%d x %d)\n", i, texture_vram_offset, state.width, state.height);
 
-        int index = surface_cache_find(texture_vram_offset);
+        int index = surface_cache_find(texture_vram_offset, 1);
         if (index >= 0) {
             // printf("found in cache\n");
 
