@@ -31,7 +31,7 @@ void track_pgraph_method(unsigned int subchannel,
                    unsigned int method,
                    uint32_t parameter)
 {
-#if 0
+#if 1
     assert(method < 0x2000);
     method_track[method]++;
 #endif

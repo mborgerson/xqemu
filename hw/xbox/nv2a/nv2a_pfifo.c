@@ -454,6 +454,7 @@ static void pfifo_run_pusher(NV2AState *d)
                     NV2A_DPRINTF("pb RET 0x%x\n", dma_get_v);
                 }
             } else if ((word & 0xe0030003) == 0) {
+
 #if FAST_SET_TRANSFORM_CONSTANT
                 //
                 // Hacky shortcut to fast set transform constants:
@@ -500,7 +501,7 @@ static void pfifo_run_pusher(NV2AState *d)
 
 
 
-                else if (hack_method == NV097_SET_VERTEX_DATA2F_M) {
+                else if ((hack_method >= NV097_SET_VERTEX_DATA2F_M) && (hack_method <= (NV097_SET_VERTEX_DATA2F_M + 0x7c))) {
                     // Make sure all queued methods have been executed
                     while ((*status & NV_PFIFO_CACHE1_STATUS_LOW_MARK) == 0) {
                         // printf("waiting for puller to finish\n");
@@ -514,10 +515,12 @@ static void pfifo_run_pusher(NV2AState *d)
                     assert(graphics_class == NV_KELVIN_PRIMITIVE);
                     assert((dma_put_v-dma_get_v) >= (hack_count*4));
 
+                    int slot_base = (hack_method - NV097_SET_VERTEX_DATA2F_M)/4;
+
                     // Bulk upload these constants
                     int islot;
                     for (islot = 0; islot < hack_count; islot++) {
-                        int slot = islot;
+                        int slot = islot + slot_base;
                         uint32_t param = ldl_le_p((uint32_t*)(dma + dma_get_v));
                         //////////////////////////////////////////////////////////////////
                         // Copy-paste from pgraph.c
@@ -537,6 +540,141 @@ static void pfifo_run_pusher(NV2AState *d)
                     }
                 }
 
+
+                else if (hack_method == NV097_SET_TRANSFORM_CONSTANT_LOAD) {
+                    // Make sure all queued methods have been executed
+                    while ((*status & NV_PFIFO_CACHE1_STATUS_LOW_MARK) == 0) {
+                        // printf("waiting for puller to finish\n");
+                        puller_cond = 1;
+                        qemu_coroutine_yield();
+                    }
+
+                    uint32_t graphics_class = GET_MASK(pg->regs[NV_PGRAPH_CTX_SWITCH1],
+                                                       NV_PGRAPH_CTX_SWITCH1_GRCLASS);
+                    int hack_count = (word >> 18) & 0x7ff;
+                    assert(graphics_class == NV_KELVIN_PRIMITIVE);
+                    assert((dma_put_v-dma_get_v) >= (hack_count*4));
+
+                    uint32_t param = ldl_le_p((uint32_t*)(dma + dma_get_v));
+                    //////////////////////////////////////////////////////////////////
+                    // Copy-paste from pgraph.c
+                    assert(param < NV2A_VERTEXSHADER_CONSTANTS);
+                    SET_MASK(pg->regs[NV_PGRAPH_CHEOPS_OFFSET],
+                             NV_PGRAPH_CHEOPS_OFFSET_CONST_LD_PTR, param);
+                    NV2A_DPRINTF("load to %d\n", param);
+                    //////////////////////////////////////////////////////////////////
+                    dma_get_v += 4;
+                }
+
+
+                else if ((hack_method >= NV097_SET_TRANSFORM_PROGRAM) && (hack_method <= (NV097_SET_TRANSFORM_PROGRAM + 0x7c))) {
+                    // Make sure all queued methods have been executed
+                    while ((*status & NV_PFIFO_CACHE1_STATUS_LOW_MARK) == 0) {
+                        // printf("waiting for puller to finish\n");
+                        puller_cond = 1;
+                        qemu_coroutine_yield();
+                    }
+
+                    uint32_t graphics_class = GET_MASK(pg->regs[NV_PGRAPH_CTX_SWITCH1],
+                                                       NV_PGRAPH_CTX_SWITCH1_GRCLASS);
+                    int hack_count = (word >> 18) & 0x7ff;
+                    assert(graphics_class == NV_KELVIN_PRIMITIVE);
+                    assert((dma_put_v-dma_get_v) >= (hack_count*4));
+
+                    int slot_base = (hack_method - NV097_SET_TRANSFORM_PROGRAM)/4;
+
+                    // Bulk upload these constants
+                    int islot;
+                    for (islot = 0; islot < hack_count; islot++) {
+                        int slot = islot + slot_base;
+                        uint32_t parameter = ldl_le_p((uint32_t*)(dma + dma_get_v));
+                        //////////////////////////////////////////////////////////////////
+                        // Copy-paste from pgraph.c
+                        int program_load = GET_MASK(pg->regs[NV_PGRAPH_CHEOPS_OFFSET],
+                                                    NV_PGRAPH_CHEOPS_OFFSET_PROG_LD_PTR);
+
+                        assert(program_load < NV2A_MAX_TRANSFORM_PROGRAM_LENGTH);
+                        pg->program_data[program_load][slot%4] = parameter;
+
+                        if (slot % 4 == 3) {
+                            SET_MASK(pg->regs[NV_PGRAPH_CHEOPS_OFFSET],
+                                     NV_PGRAPH_CHEOPS_OFFSET_PROG_LD_PTR, program_load+1);
+                        }
+                        //////////////////////////////////////////////////////////////////
+                        dma_get_v += 4;
+                    }
+                }
+
+
+
+
+                else if ((hack_method >= NV097_SET_MODEL_VIEW_MATRIX) && (hack_method <= (NV097_SET_MODEL_VIEW_MATRIX + 0xfc))) {
+                    // Make sure all queued methods have been executed
+                    while ((*status & NV_PFIFO_CACHE1_STATUS_LOW_MARK) == 0) {
+                        // printf("waiting for puller to finish\n");
+                        puller_cond = 1;
+                        qemu_coroutine_yield();
+                    }
+
+                    uint32_t graphics_class = GET_MASK(pg->regs[NV_PGRAPH_CTX_SWITCH1],
+                                                       NV_PGRAPH_CTX_SWITCH1_GRCLASS);
+                    int hack_count = (word >> 18) & 0x7ff;
+                    assert(graphics_class == NV_KELVIN_PRIMITIVE);
+                    assert((dma_put_v-dma_get_v) >= (hack_count*4));
+
+                    int slot_base = (hack_method - NV097_SET_MODEL_VIEW_MATRIX)/4;
+
+                    // Bulk upload these constants
+                    int islot;
+                    for (islot = 0; islot < hack_count; islot++) {
+                        int slot = islot + slot_base;
+                        uint32_t parameter = ldl_le_p((uint32_t*)(dma + dma_get_v));
+                        //////////////////////////////////////////////////////////////////
+                        // Copy-paste from pgraph.c
+                        unsigned int matnum = slot / 16;
+                        unsigned int entry = slot % 16;
+                        unsigned int row = NV_IGRAPH_XF_XFCTX_MMAT0 + matnum*8 + entry/4;
+                        pg->vsh_constants[row][entry % 4] = parameter;
+                        pg->vsh_constants_dirty[row] = true;
+                        //////////////////////////////////////////////////////////////////
+                        dma_get_v += 4;
+                    }
+                }
+
+
+
+
+
+                else if ((hack_method >= NV097_SET_COMPOSITE_MATRIX) && (hack_method <= (NV097_SET_COMPOSITE_MATRIX + 0x3c))) {
+                    // Make sure all queued methods have been executed
+                    while ((*status & NV_PFIFO_CACHE1_STATUS_LOW_MARK) == 0) {
+                        // printf("waiting for puller to finish\n");
+                        puller_cond = 1;
+                        qemu_coroutine_yield();
+                    }
+
+                    uint32_t graphics_class = GET_MASK(pg->regs[NV_PGRAPH_CTX_SWITCH1],
+                                                       NV_PGRAPH_CTX_SWITCH1_GRCLASS);
+                    int hack_count = (word >> 18) & 0x7ff;
+                    assert(graphics_class == NV_KELVIN_PRIMITIVE);
+                    assert((dma_put_v-dma_get_v) >= (hack_count*4));
+
+                    int slot_base = (hack_method - NV097_SET_COMPOSITE_MATRIX)/4;
+
+                    // Bulk upload these constants
+                    int islot;
+                    for (islot = 0; islot < hack_count; islot++) {
+                        int slot = islot + slot_base;
+                        uint32_t parameter = ldl_le_p((uint32_t*)(dma + dma_get_v));
+                        //////////////////////////////////////////////////////////////////
+                        // Copy-paste from pgraph.c
+                        unsigned int row = NV_IGRAPH_XF_XFCTX_CMAT0 + slot/4;
+                        pg->vsh_constants[row][slot%4] = parameter;
+                        pg->vsh_constants_dirty[row] = true;
+                        //////////////////////////////////////////////////////////////////
+                        dma_get_v += 4;
+                    }
+                }
 
 
                 else {
@@ -593,7 +731,8 @@ static void pfifo_run_pusher(NV2AState *d)
                         pg->inline_elements[pg->inline_elements_length++] = param >> 16;
                         dma_get_v += 4;
                     }
-                } else {
+                }
+                else {
 #endif
                 /* non-increasing methods */
                 SET_MASK(*dma_state, NV_PFIFO_CACHE1_DMA_STATE_METHOD,
