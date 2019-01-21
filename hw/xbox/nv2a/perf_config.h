@@ -13,6 +13,7 @@
 
 // Similar to the texture cache, try to avoid uploading geometry when possible
 #define USE_GEOMETRY_CACHE 1
+#define TRACK_GEOMETRY_CACHE_STATS 1
 
 // Experimental stuff to get rid of the many (many!) uniform setting
 #define USE_UBO 0
@@ -23,7 +24,7 @@
 #define USE_COROUTINES 1
 
 // Enable 4x surface rendering
-#define RES_SCALE_4X 0
+#define RES_SCALE_4X 1
 
 // Instead of writing surfaces out to memory...
 // - Hold on to them in a cache as they are likely to be re-used (don't re-upload)
@@ -40,5 +41,9 @@
 // the color attachment and the surface is rendered into the framebuffer with
 // a shader that flips it upside down.
 #define RENDER_TO_TEXTURE_COPY 0
+
+// Bypass parts of the FIFO state machine to fast upload indices
+// Massive performance improvement in some cases.
+#define FAST_ARRAY_ELEMENT16_UPLOAD 1
 
 #endif

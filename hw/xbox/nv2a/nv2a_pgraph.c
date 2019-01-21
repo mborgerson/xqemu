@@ -21,6 +21,37 @@
 
 #include "xxhash.h"
 
+
+#include <signal.h>
+
+
+int method_track[0x2000];
+
+void track_pgraph_method(unsigned int subchannel,
+                   unsigned int method,
+                   uint32_t parameter)
+{
+#if 0
+    assert(method < 0x2000);
+    method_track[method]++;
+#endif
+}
+
+void dump_stats(int signum) {
+    if (signum != SIGUSR2) return;
+
+    printf("DUMPING STATS\n");
+
+    FILE *fd = fopen("stats.txt", "w");
+    for (int i = 0; i < 0x2000; i++) {
+        if (method_track[i] > 0) {
+            fprintf(fd, "%04x: %d\n", i, method_track[i]);
+        }
+    } 
+    fclose(fd);
+}
+
+
 #if PROFILE_SURFACES
 #define SDPRINTF printf
 #else
@@ -664,6 +695,10 @@ struct blit_texture {
     GLuint   tex;   // Destination texture
 } blit_textures[20];
 
+int num_methods_executed = 0;
+int num_obj_methods_executed = 0;
+int num_nv097_methods_executed = 0;
+
 static void pgraph_method(NV2AState *d,
                    unsigned int subchannel,
                    unsigned int method,
@@ -673,6 +708,8 @@ static void pgraph_method(NV2AState *d,
     unsigned int slot;
 
     PGRAPHState *pg = &d->pgraph;
+
+    num_methods_executed++;
 
     bool channel_valid =
         d->pgraph.regs[NV_PGRAPH_CTX_CONTROL] & NV_PGRAPH_CTX_CONTROL_CHID;
@@ -715,6 +752,10 @@ static void pgraph_method(NV2AState *d,
 
     // NV2A_DPRINTF("graphics_class %d 0x%x\n", subchannel, graphics_class);
     pgraph_method_log(subchannel, graphics_class, method, parameter);
+
+    if (graphics_class == NV_KELVIN_PRIMITIVE) {
+        track_pgraph_method(subchannel, method, parameter);
+    }
 
     if (subchannel != 0) {
         // catches context switching issues on xbox d3d
@@ -925,6 +966,7 @@ static void pgraph_method(NV2AState *d,
 
 
     case NV_KELVIN_PRIMITIVE: { switch (method) {
+
     case NV097_SET_OBJECT:
         kelvin->object_instance = parameter;
         break;
@@ -1733,7 +1775,7 @@ glo_set_current(pg->gl_context);
                                       : NV_PGRAPH_CSV1_B;
         unsigned int mask = (slot % 2) ? NV_PGRAPH_CSV1_A_T1_S
                                        : NV_PGRAPH_CSV1_A_T0_S;
-        SET_MASK(pg->regs[reg], mask, kelvin_map_texgen(parameter, 0));
+        SET_MASK_SLOW(pg->regs[reg], mask, kelvin_map_texgen(parameter, 0));
         break;
     }
     CASE_4(NV097_SET_TEXGEN_T, 16): {
@@ -1742,7 +1784,7 @@ glo_set_current(pg->gl_context);
                                       : NV_PGRAPH_CSV1_B;
         unsigned int mask = (slot % 2) ? NV_PGRAPH_CSV1_A_T1_T
                                        : NV_PGRAPH_CSV1_A_T0_T;
-        SET_MASK(pg->regs[reg], mask, kelvin_map_texgen(parameter, 1));
+        SET_MASK_SLOW(pg->regs[reg], mask, kelvin_map_texgen(parameter, 1));
         break;
     }
     CASE_4(NV097_SET_TEXGEN_R, 16): {
@@ -1751,7 +1793,7 @@ glo_set_current(pg->gl_context);
                                       : NV_PGRAPH_CSV1_B;
         unsigned int mask = (slot % 2) ? NV_PGRAPH_CSV1_A_T1_R
                                        : NV_PGRAPH_CSV1_A_T0_R;
-        SET_MASK(pg->regs[reg], mask, kelvin_map_texgen(parameter, 2));
+        SET_MASK_SLOW(pg->regs[reg], mask, kelvin_map_texgen(parameter, 2));
         break;
     }
     CASE_4(NV097_SET_TEXGEN_Q, 16): {
@@ -1760,7 +1802,7 @@ glo_set_current(pg->gl_context);
                                       : NV_PGRAPH_CSV1_B;
         unsigned int mask = (slot % 2) ? NV_PGRAPH_CSV1_A_T1_Q
                                        : NV_PGRAPH_CSV1_A_T0_Q;
-        SET_MASK(pg->regs[reg], mask, kelvin_map_texgen(parameter, 3));
+        SET_MASK_SLOW(pg->regs[reg], mask, kelvin_map_texgen(parameter, 3));
         break;
     }
     CASE_4(NV097_SET_TEXTURE_MATRIX_ENABLE,4):
@@ -3526,9 +3568,13 @@ static void pgraph_render_surface_to_texture(
 }
 #endif
 
+
+
 static void pgraph_init(NV2AState *d)
 {
     int i;
+
+    signal(SIGUSR2, dump_stats);
 
     PGRAPHState *pg = &d->pgraph;
 
@@ -5164,10 +5210,8 @@ static void pgraph_bind_textures(NV2AState *d)
         TextureLocationKey key = {
             .state = state,
             .texture_data = texture_data,
-            .texture_data_offset = texture_data - d->vram_ptr,
             .texture_len = length,
             .palette_data = palette_data,
-            .palette_data_offset = palette_data - d->vram_ptr,
             .palette_len = palette_length
         };
 
@@ -5356,6 +5400,13 @@ static void pgraph_get_surface_dimensions(PGRAPHState *pg,
     }
 }
 
+#if TRACK_GEOMETRY_CACHE_STATS
+int attr_cache_hit;
+int attr_cache_miss;
+int attr_cache_mem_upload;
+int attr_cache_mem_upload2;
+#endif
+
 static void pgraph_update_memory_buffer(NV2AState *d, hwaddr addr, hwaddr size,
                                         bool f)
 {
@@ -5368,12 +5419,14 @@ static void pgraph_update_memory_buffer(NV2AState *d, hwaddr addr, hwaddr size,
                                                 addr,
                                                 end - addr,
                                                 DIRTY_MEMORY_NV2A)) {
+        attr_cache_mem_upload++;
         SDPRINTF("....-> Actually uploading\n");
         glBufferSubData(GL_ARRAY_BUFFER, addr, end - addr, d->vram_ptr + addr);
     } else {
         SDPRINTF(" skipped!\n");
     }
 }
+
 
 static void pgraph_bind_vertex_attributes(NV2AState *d,
                                           unsigned int num_elements,
@@ -5447,6 +5500,7 @@ static void pgraph_bind_vertex_attributes(NV2AState *d,
                 if (!key_out->populated) {
                     SDPRINTF("....uploading\n");
 
+                    attr_cache_miss++;
 
                     for (j=attribute->converted_elements; j<num_elements; j++) {
                         uint8_t *in = data + j * in_stride;
@@ -5479,6 +5533,7 @@ static void pgraph_bind_vertex_attributes(NV2AState *d,
                     key_out->populated = 1;
                 } else {
                     SDPRINTF("Re-using buffer!\n");
+                    attr_cache_hit++;
                 }
 #else
 
@@ -5525,6 +5580,7 @@ static void pgraph_bind_vertex_attributes(NV2AState *d,
                     0);
             } else if (inline_data) {
                 SDPRINTF("Binding gl_inline_array_buffer\n");
+                attr_cache_mem_upload2++;
                 glBindBuffer(GL_ARRAY_BUFFER, pg->gl_inline_array_buffer);
                 glVertexAttribPointer(i,
                                       attribute->gl_count,
@@ -5534,6 +5590,7 @@ static void pgraph_bind_vertex_attributes(NV2AState *d,
                                       (void*)(uintptr_t)attribute->inline_array_offset);
             } else {
                 SDPRINTF("Updating memory buffer... %d * %d\n", num_elements, attribute->stride);
+                // attr_cache_mem_upload++;
                 hwaddr addr = data - d->vram_ptr;
                 pgraph_update_memory_buffer(d, addr,
                                             num_elements * attribute->stride,
@@ -5723,6 +5780,8 @@ static void upload_gl_texture(GLenum gl_target,
                               const uint8_t *palette_data)
 {
     ColorFormatInfo f = kelvin_color_format_map[s.color_format];
+
+    // printf("tex upload\n");
 
     switch(gl_target) {
     case GL_TEXTURE_1D:
@@ -6097,6 +6156,12 @@ static TextureBinding* generate_texture(const TextureShape s,
     return ret;
 }
 
+#if TRACK_GEOMETRY_CACHE_STATS
+int geo_cache_hit;
+int geo_cache_miss;
+int geo_cache_retire;
+#endif
+
 #if USE_GEOMETRY_CACHE
 
 // New geometry cache
@@ -6106,6 +6171,11 @@ struct lru_node *gce_init(struct lru_node *obj, void *key)
     struct GeometryKey *k_in = (struct GeometryKey *)key;
     memcpy(k_out, k_in, sizeof(struct GeometryKey));
     glGenBuffers(1, &k_out->buffer_id);
+
+#if TRACK_GEOMETRY_CACHE_STATS
+    geo_cache_miss++;
+#endif
+
     return obj;
 }
 
@@ -6114,6 +6184,11 @@ struct lru_node *gce_deinit(struct lru_node *obj)
     struct GeometryKey *a = container_of(obj, struct GeometryKey, node);
     SDPRINTF("Evicting from geometry cache!\n");
     glDeleteBuffers(1, &a->buffer_id);
+
+#if TRACK_GEOMETRY_CACHE_STATS
+    geo_cache_retire++;
+#endif
+    
     return obj;
 }
 
@@ -6125,6 +6200,10 @@ int gce_key_compare(struct lru_node *obj, void *key)
            (a->buffer_length != b->buffer_length)) {
         return 1;
     }
+
+#if TRACK_GEOMETRY_CACHE_STATS
+    geo_cache_hit++;
+#endif
 
     return 0;
 }
@@ -6244,10 +6323,10 @@ static int texture_location_cache_entry_compare(struct lru_node *obj, void *key)
     struct TextureLocationKey *a = container_of(obj, struct TextureLocationKey, node);
     struct TextureLocationKey *b = (struct TextureLocationKey *)key;
 
-    if (a->texture_data_offset != b->texture_data_offset) return 1;
-    if (a->texture_len         != b->texture_len) return 1;
-    if (a->palette_data_offset != b->palette_data_offset) return 1;
-    if (a->palette_len         != b->palette_len) return 1;
+    if (a->texture_data != b->texture_data) return 1;
+    if (a->texture_len  != b->texture_len) return 1;
+    if (a->palette_data != b->palette_data) return 1;
+    if (a->palette_len  != b->palette_len) return 1;
 
     int state_equ = memcmp(&a->state, &b->state, sizeof(a->state));
     if (state_equ) {
@@ -6262,12 +6341,12 @@ static int texture_location_cache_entry_compare(struct lru_node *obj, void *key)
 
     // State equal... check to see if the memory was touched
     bool texture_dirty = memory_region_test_and_clear_dirty(fuck_fuck_fixme->vram,
-        a->texture_data_offset, a->texture_len, DIRTY_MEMORY_VGA);
+        a->texture_data - fuck_fuck_fixme->vram_ptr, a->texture_len, DIRTY_MEMORY_VGA);
 
     if (a->palette_len > 0) {
         // Check palette too
         texture_dirty |= memory_region_test_and_clear_dirty(fuck_fuck_fixme->vram,
-            a->palette_data_offset, a->palette_len, DIRTY_MEMORY_VGA);
+            a->palette_data - fuck_fuck_fixme->vram_ptr, a->palette_len, DIRTY_MEMORY_VGA);
     }
 
     if (!texture_dirty) {

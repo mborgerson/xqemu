@@ -177,8 +177,8 @@ static void pfifo_run_puller(NV2AState *d)
 
             /* the engine is bound to the subchannel */
             assert(subchannel < 8);
-            SET_MASK(*engine_reg, 3 << (4*subchannel), entry.engine);
-            SET_MASK(*pull1, NV_PFIFO_CACHE1_PULL1_ENGINE, entry.engine);
+            SET_MASK_SLOW(*engine_reg, 3 << (4*subchannel), entry.engine);
+            SET_MASK_SLOW(*pull1, NV_PFIFO_CACHE1_PULL1_ENGINE, entry.engine);
             // NV2A_DPRINTF("engine_reg1 %d 0x%x\n", subchannel, *engine_reg);
 
 #if !USE_COROUTINES
@@ -301,7 +301,6 @@ static void pfifo_run_pusher(NV2AState *d)
     uint32_t *dma_get = &d->pfifo.regs[NV_PFIFO_CACHE1_DMA_GET];
     uint32_t *dma_put = &d->pfifo.regs[NV_PFIFO_CACHE1_DMA_PUT];
     uint32_t *dma_dcount = &d->pfifo.regs[NV_PFIFO_CACHE1_DMA_DCOUNT];
-
     uint32_t *status = &d->pfifo.regs[NV_PFIFO_CACHE1_STATUS];
     uint32_t *get_reg = &d->pfifo.regs[NV_PFIFO_CACHE1_GET];
     uint32_t *put_reg = &d->pfifo.regs[NV_PFIFO_CACHE1_PUT];
@@ -466,6 +465,43 @@ static void pfifo_run_pusher(NV2AState *d)
                          NV_PFIFO_CACHE1_DMA_STATE_METHOD_TYPE_INC);
                 *dma_dcount = 0;
             } else if ((word & 0xe0030003) == 0x40000000) {
+#if FAST_ARRAY_ELEMENT16_UPLOAD
+                //
+                // Hacky shortcut to fast-upload inline indices:
+                //
+                //   This is a very hot path! Let's bypass the fifo state machines
+                //   for now and copy these elements over directly. Yields massive
+                //   performance improvement in dashboard / Halo:CE.
+                //
+                const int hack_method = (word & 0x1fff);
+                struct PGRAPHState *pg = &d->pgraph;
+                if (hack_method == NV097_ARRAY_ELEMENT16) {
+                    uint32_t graphics_class = GET_MASK(pg->regs[NV_PGRAPH_CTX_SWITCH1],
+                                                       NV_PGRAPH_CTX_SWITCH1_GRCLASS);
+                    int hack_count = (word >> 18) & 0x7ff;
+                    assert(graphics_class == NV_KELVIN_PRIMITIVE);
+                    assert((dma_put_v-dma_get_v) >= (hack_count*4));
+
+                    // printf("element 16 x %d!\n", hack_count);
+
+                    // Make sure all queued methods have been executed
+                    while ((*status & NV_PFIFO_CACHE1_STATUS_LOW_MARK) == 0) {
+                        // printf("waiting for puller to finish\n");
+                        puller_cond = 1;
+                        qemu_coroutine_yield();
+                    }
+
+                    // Bulk upload these inline indices
+                    int count_index;
+                    assert((pg->inline_elements_length+hack_count*2) < NV2A_MAX_BATCH_LENGTH);
+                    for (count_index = 0; count_index < hack_count; count_index++) {
+                        uint32_t param = ldl_le_p((uint32_t*)(dma + dma_get_v));
+                        pg->inline_elements[pg->inline_elements_length++] = param & 0xFFFF;
+                        pg->inline_elements[pg->inline_elements_length++] = param >> 16;
+                        dma_get_v += 4;
+                    }
+                } else {
+#endif
                 /* non-increasing methods */
                 SET_MASK(*dma_state, NV_PFIFO_CACHE1_DMA_STATE_METHOD,
                          (word & 0x1fff) >> 2 );
@@ -475,6 +511,9 @@ static void pfifo_run_pusher(NV2AState *d)
                          (word >> 18) & 0x7ff);
                 SET_MASK(*dma_state, NV_PFIFO_CACHE1_DMA_STATE_METHOD_TYPE,
                          NV_PFIFO_CACHE1_DMA_STATE_METHOD_TYPE_NON_INC);
+#if FAST_ARRAY_ELEMENT16_UPLOAD
+                }
+#endif
                 *dma_dcount = 0;
             } else {
                 NV2A_DPRINTF("pb reserved cmd 0x%x - 0x%x\n",

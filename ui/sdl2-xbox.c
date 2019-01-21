@@ -151,26 +151,83 @@ static void sdl2_gl_render_surface(struct sdl2_console *scon)
 #if 1
             if (second_elapse()) {
                 printf("FPS: %d, UPDATES: %d\n", frames, updates);
+
+                if (frames > 0) {
+                    extern int shader_bindings;
+                    // printf("Shader Bindings / frame: %d\n", shader_bindings/frames);
+                    shader_bindings = 0;
+                }
+                
+
+                if (frames > 0) {
+                    extern int num_methods_executed;
+                    // printf("[pgraph methods] #%d (avg = %d)\n", num_methods_executed, num_methods_executed/frames);
+                    num_methods_executed = 0;
+                }
+                
                 frames = 0;
                 updates = 0;
 
-                extern int shader_bindings;
-                printf("Shader Bindings: %d\n", shader_bindings);
-                shader_bindings = 0;
 
 #if TRACK_LOCATION_CACHE_STATS
                 int total = loc_cache_hit + loc_cache_miss;
 
-                printf("[Loc Cache] Hit:%d, Miss:%d, False Miss:%d --> %.2f%%\n",
-                    loc_cache_hit,
-                    loc_cache_miss,
-                    loc_cache_false_dirty,
-                    total > 0 ? (float)(loc_cache_hit-loc_cache_false_dirty)/(float)total*100.0 : 0.0
-                    );
+                // printf("[Loc Cache] Hit:%d, Miss:%d, False Miss:%d --> %.2f%%\n",
+                //     loc_cache_hit,
+                //     loc_cache_miss,
+                //     loc_cache_false_dirty,
+                //     total > 0 ? (float)(loc_cache_hit-loc_cache_false_dirty)/(float)total*100.0 : 0.0
+                //     );
                 loc_cache_hit = 0;
                 loc_cache_miss = 0;
                 loc_cache_false_dirty = 0;
 #endif
+
+
+#if TRACK_GEOMETRY_CACHE_STATS
+                {
+                extern int geo_cache_hit;
+                extern int geo_cache_miss;
+                extern int geo_cache_retire;
+                int total = geo_cache_hit + geo_cache_miss;
+
+                // printf("[geometry Cache] Hit:%d, Miss:%d, Retired:%d --> %.2f%%\n",
+                //     geo_cache_hit,
+                //     geo_cache_miss,
+                //     geo_cache_retire,
+                //     total > 0 ? (float)(geo_cache_hit)/(float)total*100.0 : 0.0
+                //     );
+                geo_cache_hit = 0;
+                geo_cache_miss = 0;
+                geo_cache_retire = 0;
+                }
+#endif
+
+#if TRACK_GEOMETRY_CACHE_STATS
+                {
+                extern int attr_cache_hit;
+                extern int attr_cache_miss;
+                extern int attr_cache_mem_upload;
+                extern int attr_cache_mem_upload2;
+                int total = attr_cache_hit + attr_cache_miss;
+
+                // printf("[attr Cache] Hit:%d, Miss:%d, Mem Upload: %d, %d --> %.2f%%\n",
+                //     attr_cache_hit,
+                //     attr_cache_miss,
+                //     attr_cache_mem_upload,
+                //     attr_cache_mem_upload2,
+                //     total > 0 ? (float)(attr_cache_hit)/(float)total*100.0 : 0.0
+                //     );
+                attr_cache_hit = 0;
+                attr_cache_miss = 0;
+                attr_cache_mem_upload = 0;
+                attr_cache_mem_upload2 = 0;
+                }
+#endif
+
+
+
+
             }
             frames++;
 #endif

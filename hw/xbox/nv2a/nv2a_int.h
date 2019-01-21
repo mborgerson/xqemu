@@ -50,12 +50,20 @@
 #define GET_MASK(v, mask) (((v) & (mask)) >> (mask ## _MASK))
 // #define GET_MASK(v, mask) GET_MASK_SLOW(v, mask)
 
-#define SET_MASK(v, mask, val)                            \
+#define SET_MASK_SLOW(v, mask, val)                            \
     ({                                                    \
         const unsigned int __val = (val);                 \
         const unsigned int __mask = (mask);               \
         (v) &= ~(__mask);                                 \
         (v) |= ((__val) << ctz32(__mask)) & (__mask);     \
+    })
+
+#define SET_MASK(v, mask, val)                            \
+    ({                                                    \
+        const unsigned int __val = (val);                 \
+        const unsigned int __mask = (mask);               \
+        (v) &= ~(__mask);                                 \
+        (v) |= ((__val) << mask ## _MASK) & (__mask);     \
     })
 
 #define CASE_4(v, step)      \
@@ -150,12 +158,10 @@ typedef struct TextureBinding {
 typedef struct TextureLocationKey {
     struct lru_node node;
     TextureShape state;
-    hwaddr texture_data_offset;
-    size_t texture_len;
-    hwaddr palette_data_offset;
-    size_t palette_len;
     uint8_t *texture_data;
+    size_t texture_len;
     uint8_t *palette_data;
+    size_t palette_len;
     TextureBinding *binding;
     uint64_t hash;
 } TextureLocationKey;
