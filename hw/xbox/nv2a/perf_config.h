@@ -42,6 +42,8 @@
 // a shader that flips it upside down.
 #define RENDER_TO_TEXTURE_COPY 1
 
+#define PROFILE_FLIP 0
+
 // Bypass parts of the FIFO state machine to fast upload indices
 // Massive performance improvement in some cases.
 #define FAST_ARRAY_ELEMENT16_UPLOAD 0

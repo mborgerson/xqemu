@@ -141,7 +141,7 @@ static void sdl2_gl_render_surface(struct sdl2_console *scon)
         available = 0; // <--
         qemu_spin_unlock(&avail_spinner);
 #endif
-            glBindTexture(GL_TEXTURE_2D, 0);
+            // glBindTexture(GL_TEXTURE_2D, 0);
 
             SDL_GL_SwapWindow(scon->real_window);
 

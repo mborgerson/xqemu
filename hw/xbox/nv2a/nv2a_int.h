@@ -43,11 +43,8 @@
 
 #define CRPRINTF(...)
 
-
 #define GET_MASK_SLOW(v, mask) (((v) & (mask)) >> ctz32(mask))
-
-// #define GET_MASK_(v, mask) 
-#define GET_MASK(v, mask) (((v) & (mask)) >> (mask ## _MASK))
+#define GET_MASK(v, mask) (((v) & (mask)) >> (mask ## __PREMASK))
 // #define GET_MASK(v, mask) GET_MASK_SLOW(v, mask)
 
 #define SET_MASK_SLOW(v, mask, val)                            \
@@ -63,8 +60,10 @@
         const unsigned int __val = (val);                 \
         const unsigned int __mask = (mask);               \
         (v) &= ~(__mask);                                 \
-        (v) |= ((__val) << mask ## _MASK) & (__mask);     \
+        (v) |= ((__val) << mask ## __PREMASK) & (__mask);     \
     })
+// #define SET_MASK(v, mask, val) SET_MASK_SLOW(v, mask, val)
+
 
 #define CASE_4(v, step)      \
     case (v):                \
