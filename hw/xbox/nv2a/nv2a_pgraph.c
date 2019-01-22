@@ -2249,8 +2249,8 @@ glo_set_current(pg->gl_context);
          *        the report memory block?
          */
         if (pg->gl_zpass_pixel_count_query_count) {
-            glDeleteQueries(pg->gl_zpass_pixel_count_query_count,
-                            pg->gl_zpass_pixel_count_queries);
+            // glDeleteQueries(pg->gl_zpass_pixel_count_query_count,
+            //                 pg->gl_zpass_pixel_count_queries);
             pg->gl_zpass_pixel_count_query_count = 0;
         }
         pg->zpass_pixel_count_result = 0;
@@ -2279,14 +2279,14 @@ glo_set_current(pg->gl_context);
         /* FIXME: What about clipping regions etc? */
         for(i = 0; i < pg->gl_zpass_pixel_count_query_count; i++) {
             GLuint gl_query_result = 0;
-            glGetQueryObjectuiv(pg->gl_zpass_pixel_count_queries[i],
-                                GL_QUERY_RESULT,
-                                &gl_query_result);
+            // glGetQueryObjectuiv(pg->gl_zpass_pixel_count_queries[i],
+            //                     GL_QUERY_RESULT,
+            //                     &gl_query_result);
             pg->zpass_pixel_count_result += gl_query_result;
         }
         if (pg->gl_zpass_pixel_count_query_count) {
-            glDeleteQueries(pg->gl_zpass_pixel_count_query_count,
-                            pg->gl_zpass_pixel_count_queries);
+            // glDeleteQueries(pg->gl_zpass_pixel_count_query_count,
+            //                 pg->gl_zpass_pixel_count_queries);
         }
         pg->gl_zpass_pixel_count_query_count = 0;
 
@@ -2474,7 +2474,7 @@ glo_set_current(pg->gl_context);
 
             /* End of visibility testing */
             if (pg->zpass_pixel_count_enable) {
-                glEndQuery(GL_SAMPLES_PASSED);
+                // glEndQuery(GL_SAMPLES_PASSED);
             }
 
             NV2A_GL_DGROUP_END();
@@ -2650,14 +2650,14 @@ glo_set_current(pg->gl_context);
             /* Visibility testing */
             if (pg->zpass_pixel_count_enable) {
                 GLuint gl_query = 0;
-                glGenQueries(1, &gl_query);
+                // glGenQueries(1, &gl_query);
                 pg->gl_zpass_pixel_count_query_count++;
                 pg->gl_zpass_pixel_count_queries = (GLuint*)g_realloc(
                     pg->gl_zpass_pixel_count_queries,
                     sizeof(GLuint) * pg->gl_zpass_pixel_count_query_count);
                 pg->gl_zpass_pixel_count_queries[
                     pg->gl_zpass_pixel_count_query_count - 1] = gl_query;
-                glBeginQuery(GL_SAMPLES_PASSED, gl_query);
+                // glBeginQuery(GL_SAMPLES_PASSED, gl_query);
             }
         }
 
@@ -5460,6 +5460,7 @@ static void pgraph_update_memory_buffer(NV2AState *d, hwaddr addr, hwaddr size,
         attr_cache_mem_upload++;
         SDPRINTF("....-> Actually uploading\n");
         glBufferSubData(GL_ARRAY_BUFFER, addr, end - addr, d->vram_ptr + addr);
+        // glFinish();
     } else {
         SDPRINTF(" skipped!\n");
     }
