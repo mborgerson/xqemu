@@ -47,10 +47,16 @@ void dump_stats(int signum) {
         if (method_track[i] > 0) {
             fprintf(fd, "%04x: %d\n", i, method_track[i]);
         }
-    } 
+    }
     fclose(fd);
 }
 
+static void pgraph_render_surface_to_texture(
+    NV2AState *d, GLsync fence,
+    GLuint src, GLenum src_format, GLenum src_target,
+    GLuint dst, GLenum dst_format, GLenum dst_target,
+    int width, int height, int src_zeta, int flip
+    );
 
 #if PROFILE_SURFACES
 #define SDPRINTF printf
@@ -901,6 +907,7 @@ static void pgraph_method(NV2AState *d,
                      width, height,
                      0, gl_format, gl_type,
                      NULL); // skipping upload
+#if RENDER_TO_TEXTURE_COPY
                 for (int i = 0; i < height; i++) {
                     glCopyImageSubData(
     #if 0
@@ -911,7 +918,19 @@ static void pgraph_method(NV2AState *d,
                         gl_buf,              GL_TEXTURE_2D, 0, 0, i, 0,
                         width/4, 1, 1);
                 }
-
+#else
+                // pgraph_render_surface_to_texture(
+                //     NV2AState *d, GLsync fence,
+                //     GLuint src, GLenum src_format, GLenum src_target,
+                //     GLuint dst, GLenum dst_format, GLenum dst_target,
+                //     int width, int height, int src_zeta
+                pgraph_render_surface_to_texture(
+                    d, glFenceSync( GL_SYNC_GPU_COMMANDS_COMPLETE, 0 ),
+                    pg->gl_color_buffer, gl_format, GL_TEXTURE_2D,
+                    gl_buf, gl_format, GL_TEXTURE_2D,
+                    width/4, height, 0, 0
+                    );
+#endif
 
                 int index = surface_cache_store(dest - d->vram_ptr);
                 surface_cache[index].buf_id = gl_buf;
@@ -2230,8 +2249,8 @@ glo_set_current(pg->gl_context);
          *        the report memory block?
          */
         if (pg->gl_zpass_pixel_count_query_count) {
-            // glDeleteQueries(pg->gl_zpass_pixel_count_query_count,
-            //                 pg->gl_zpass_pixel_count_queries);
+            glDeleteQueries(pg->gl_zpass_pixel_count_query_count,
+                            pg->gl_zpass_pixel_count_queries);
             pg->gl_zpass_pixel_count_query_count = 0;
         }
         pg->zpass_pixel_count_result = 0;
@@ -2260,14 +2279,14 @@ glo_set_current(pg->gl_context);
         /* FIXME: What about clipping regions etc? */
         for(i = 0; i < pg->gl_zpass_pixel_count_query_count; i++) {
             GLuint gl_query_result = 0;
-            // glGetQueryObjectuiv(pg->gl_zpass_pixel_count_queries[i],
-            //                     GL_QUERY_RESULT,
-            //                     &gl_query_result);
+            glGetQueryObjectuiv(pg->gl_zpass_pixel_count_queries[i],
+                                GL_QUERY_RESULT,
+                                &gl_query_result);
             pg->zpass_pixel_count_result += gl_query_result;
         }
         if (pg->gl_zpass_pixel_count_query_count) {
-            // glDeleteQueries(pg->gl_zpass_pixel_count_query_count,
-            //                 pg->gl_zpass_pixel_count_queries);
+            glDeleteQueries(pg->gl_zpass_pixel_count_query_count,
+                            pg->gl_zpass_pixel_count_queries);
         }
         pg->gl_zpass_pixel_count_query_count = 0;
 
@@ -2631,14 +2650,14 @@ glo_set_current(pg->gl_context);
             /* Visibility testing */
             if (pg->zpass_pixel_count_enable) {
                 GLuint gl_query = 0;
-                // glGenQueries(1, &gl_query);
+                glGenQueries(1, &gl_query);
                 pg->gl_zpass_pixel_count_query_count++;
                 pg->gl_zpass_pixel_count_queries = (GLuint*)g_realloc(
                     pg->gl_zpass_pixel_count_queries,
                     sizeof(GLuint) * pg->gl_zpass_pixel_count_query_count);
                 pg->gl_zpass_pixel_count_queries[
                     pg->gl_zpass_pixel_count_query_count - 1] = gl_query;
-                // glBeginQuery(GL_SAMPLES_PASSED, gl_query);
+                glBeginQuery(GL_SAMPLES_PASSED, gl_query);
             }
         }
 
@@ -3357,10 +3376,11 @@ static const char *frag_shader_src =
     "uniform sampler2D tex;\n"
     "uniform usampler2D utex;\n"
     "uniform int is_stencil;\n"
+    "uniform int do_flip;\n"
     "void main()\n"
     "{\n"
         "vec2 texCoord = gl_FragCoord.xy/textureSize(tex,0).xy;\n"
-        "texCoord.y = 1.0 - texCoord.y;\n"
+        "if (do_flip > 0) texCoord.y = 1.0 - texCoord.y;\n"
         // "if (is_stencil > 0) {\n"
         // "  float val = float(texture(utex, texCoord).r)/255.0;\n"
         // "  out_Color.rgba = vec4(0,0,val,0);\n"
@@ -3373,6 +3393,7 @@ static const char *frag_shader_src =
 GLuint texture_bound_location;
 GLuint is_stencil_uni;
 GLuint utex_loc;
+GLuint do_flip;
 
 #if RENDER_TO_TEXTURE
 static void pgraph_setup_surface_to_texture(NV2AState *d)
@@ -3421,6 +3442,7 @@ static void pgraph_setup_surface_to_texture(NV2AState *d)
     texture_bound_location = glGetUniformLocation(pg->r2t.m_shader_prog, "tex");
     utex_loc = glGetUniformLocation(pg->r2t.m_shader_prog, "utex");
     is_stencil_uni = glGetUniformLocation(pg->r2t.m_shader_prog, "is_stencil");
+    do_flip = glGetUniformLocation(pg->r2t.m_shader_prog, "do_flip");
 
     // Populate an empty vertex buffer
     glGenBuffers(1, &pg->r2t.m_vbo);
@@ -3436,7 +3458,7 @@ static void pgraph_render_surface_to_texture(
     NV2AState *d, GLsync fence,
     GLuint src, GLenum src_format, GLenum src_target,
     GLuint dst, GLenum dst_format, GLenum dst_target,
-    int width, int height, int src_zeta
+    int width, int height, int src_zeta, int flip
     )
 {
     ColorFormatInfo f = kelvin_color_format_map[dst_format];
@@ -3513,6 +3535,7 @@ static void pgraph_render_surface_to_texture(
     glProgramUniform1i(d->pgraph.r2t.m_shader_prog, texture_bound_location, m_final_texture_unit-GL_TEXTURE0);
     // glProgramUniform1i(d->pgraph.r2t.m_shader_prog, utex_loc, m_final_texture_unit-GL_TEXTURE0);
     glProgramUniform1i(d->pgraph.r2t.m_shader_prog, is_stencil_uni, src_zeta);
+    glProgramUniform1i(d->pgraph.r2t.m_shader_prog, do_flip, flip);
 
     // Render
     glColorMask(true, true, true, true);
@@ -4587,10 +4610,10 @@ static void pgraph_update_surface_part(NV2AState *d, bool upload, bool color) {
     if (color) {
         // dirty |= 1;
         // SDPRINTF("Testing %08lx... %d -> ", surface->offset, dirty);
-        dirty |= memory_region_test_and_clear_dirty(d->vram,
-                                               dma.address + surface->offset,
-                                               surface->pitch * height,
-                                               DIRTY_MEMORY_NV2A);
+        // dirty |= memory_region_test_and_clear_dirty(d->vram,
+        //                                        dma.address + surface->offset,
+        //                                        surface->pitch * height,
+        //                                        DIRTY_MEMORY_NV2A);
         // SDPRINTF("%d (%s)\n", dirty, dirty ? "DIRTY" : "CLEAN");
     }
     if (upload && dirty) {
@@ -4661,7 +4684,7 @@ static void pgraph_update_surface_part(NV2AState *d, bool upload, bool color) {
                 // Should be compatible
             } else {
                 printf("Tried to load %s surface, wanted %s\n",
-                    surface_cache[index].color ? "color" : "zeta", 
+                    surface_cache[index].color ? "color" : "zeta",
                     color ? "color" : "zeta");
                 glDeleteTextures(1, &surface_cache[index].buf_id);
                 surface_cache_retire(index);
@@ -5287,7 +5310,7 @@ static void pgraph_bind_textures(NV2AState *d)
 #else
                     state.width, state.height
 #endif
-                    , !surface_cache[index].color
+                    , !surface_cache[index].color, 1
                     );
 
     #if RES_SCALE_4X
@@ -6203,7 +6226,7 @@ struct lru_node *gce_deinit(struct lru_node *obj)
 #if TRACK_GEOMETRY_CACHE_STATS
     geo_cache_retire++;
 #endif
-    
+
     return obj;
 }
 

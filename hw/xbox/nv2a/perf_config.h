@@ -9,7 +9,7 @@
 // Try to avoid re-uploading textures again and again by keeping them in GPU
 // memory and identifying them using a fast hashing method.
 #define USE_TEXTURE_CACHE 1
-#define USE_TEXTURE_LOCATION_CACHE 1 // FIXME: Need to debug issue with double free
+#define USE_TEXTURE_LOCATION_CACHE 0 // FIXME: Need to debug issue with double free
 #define TRACK_LOCATION_CACHE_STATS 0
 
 // Similar to the texture cache, try to avoid uploading geometry when possible
@@ -25,7 +25,7 @@
 #define USE_COROUTINES 1
 
 // Enable 4x surface rendering
-#define RES_SCALE_4X 1
+#define RES_SCALE_4X 0
 
 // Instead of writing surfaces out to memory...
 // - Hold on to them in a cache as they are likely to be re-used (don't re-upload)
