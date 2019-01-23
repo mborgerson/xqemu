@@ -125,7 +125,7 @@ static void sdl2_gl_render_surface(struct sdl2_console *scon)
         if (display_tex) {
 
             // Make sure to wait for rendering to finish
-            glWaitSync(fence, 0, GL_TIMEOUT_IGNORED);
+            //glWaitSync(fence, 0, GL_TIMEOUT_IGNORED);
 
             // Render the surface to this fbo
             glViewport(0, 0, ww, wh);
