@@ -148,7 +148,7 @@ static void sdl2_gl_render_surface(struct sdl2_console *scon)
 
 
 
-#if 1
+#if 0
             if (second_elapse()) {
                 printf("FPS: %d, UPDATES: %d\n", frames, updates);
 
@@ -648,7 +648,7 @@ static void xb_surface_gl_destroy_texture(DisplaySurface *surface)
 //
 // Helper to determine if we should print some stats on a 1 second interval
 //
-#if 1
+#if 0
 static int second_elapse(void)
 {
     struct timeval tv_now, tv_since_last;
