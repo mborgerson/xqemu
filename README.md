@@ -8,8 +8,9 @@ changes are not complete and may cause unexpected behavior, potentially
 help in measuring impact of these changes in terms of performance gains and
 overall application stability. Eventually these changes will grow up to become
 PRs and integrated into XQEMU master, so *your* testing feedback is welcome
-and encouraged.
-    
+and encouraged. Reach out on Discord or IRC. Appveyor builds can be found
+[here](https://ci.appveyor.com/project/mborgerson/xqemu).
+
 Performance related changes:
 - Elementary surface caching based on address/shape
 - Surface-to-texture transfer
