@@ -5,6 +5,7 @@
 #define PROFILE_SURFACES 0
 #define PROFILE_TEXTURES 0
 #define PROFILE_FLIP 0
+#define PROFILE_METHODS 0
 
 // Try to avoid re-uploading textures again and again by keeping them in GPU
 // memory and identifying them using a fast hashing method.
@@ -14,7 +15,7 @@
 
 // Similar to the texture cache, try to avoid uploading geometry when possible
 #define USE_GEOMETRY_CACHE 1
-#define TRACK_GEOMETRY_CACHE_STATS 1
+#define TRACK_GEOMETRY_CACHE_STATS 0
 
 // Experimental stuff to get rid of the many (many!) uniform setting
 #define USE_UBO 0
@@ -25,7 +26,7 @@
 #define USE_COROUTINES 1
 
 // Enable 4x surface rendering
-#define RES_SCALE_4X 0
+#define RES_SCALE_4X 1
 
 // Instead of writing surfaces out to memory...
 // - Hold on to them in a cache as they are likely to be re-used (don't re-upload)

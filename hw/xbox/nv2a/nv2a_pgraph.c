@@ -21,20 +21,15 @@
 
 #include "xxhash.h"
 
-
+#if PROFILE_METHODS
 #include <signal.h>
-
-
 int method_track[0x2000];
-
 void track_pgraph_method(unsigned int subchannel,
                    unsigned int method,
                    uint32_t parameter)
 {
-#if 0
     assert(method < 0x2000);
     method_track[method]++;
-#endif
 }
 
 void dump_stats(int signum) {
@@ -50,6 +45,7 @@ void dump_stats(int signum) {
     }
     fclose(fd);
 }
+#endif
 
 static void pgraph_render_surface_to_texture(
     NV2AState *d, GLsync fence,
@@ -73,6 +69,10 @@ static void pgraph_render_surface_to_texture(
 struct timeval tv_start;
 int tv_start_valid = 0;
 
+static void print_timestamp(void);
+static void start_frame_timer(void);
+static void stop_frame_timer(void);
+
 static void print_timestamp()
 {
     struct timeval tv_now, tv_since_start;
@@ -89,9 +89,6 @@ static void print_timestamp()
     printf("[%4ld.%06ld] ", tv_since_start.tv_sec, tv_since_start.tv_usec);
 }
 
-
-
-
 struct timeval frame_timer_start;
 int frame_timer_started = 0;
 
@@ -104,11 +101,12 @@ static void start_frame_timer()
 #endif
 }
 
-int i = 0;
 
 static void stop_frame_timer()
 {
 #if 1
+    static int i = 0;
+
     if (!frame_timer_started) return;
     struct timeval tv_now, tv_since_start;
     gettimeofday(&tv_now, NULL);
@@ -559,9 +557,11 @@ static void upload_gl_texture(GLenum gl_target, const TextureShape s, const uint
 static TextureBinding* generate_texture(const TextureShape s, const uint8_t *texture_data, const uint8_t *palette_data);
 static void texture_binding_destroy(gpointer data);
 
+#if USE_TEXTURE_LOCATION_CACHE
 static struct lru_node *texture_location_cache_entry_init(struct lru_node *obj, void *key);
 static struct lru_node *texture_location_cache_entry_deinit(struct lru_node *obj);
 static int texture_location_cache_entry_compare(struct lru_node *obj, void *key);
+#endif
 
 static struct lru_node *texture_cache_entry_init(struct lru_node *obj, void *key);
 static struct lru_node *texture_cache_entry_deinit(struct lru_node *obj);
@@ -760,9 +760,11 @@ static void pgraph_method(NV2AState *d,
     // NV2A_DPRINTF("graphics_class %d 0x%x\n", subchannel, graphics_class);
     pgraph_method_log(subchannel, graphics_class, method, parameter);
 
+#if PROFILE_METHODS
     if (graphics_class == NV_KELVIN_PRIMITIVE) {
         track_pgraph_method(subchannel, method, parameter);
     }
+#endif
 
     if (subchannel != 0) {
         // catches context switching issues on xbox d3d
@@ -971,11 +973,8 @@ static void pgraph_method(NV2AState *d,
                     + (image_blit->out_y + y) * context_surfaces->dest_pitch
                     + image_blit->out_x * bytes_per_pixel;
 
-#if !RENDER_TO_TEXTURE
                 memmove(dest_row, source_row,
                         image_blit->width * bytes_per_pixel);
-#endif
-                memset(dest_row, 0, image_blit->width * bytes_per_pixel);
             }
         } else {
             assert(false);
@@ -1169,6 +1168,7 @@ static void pgraph_method(NV2AState *d,
 #if 0
         int reps = 0;
         while (available) {
+            /// kills perf...
             // if (++reps > 750) {
             //     printf("waiting for frame to be consumed\n");
             //     reps = 0;
@@ -3118,6 +3118,8 @@ glo_set_current(pg->gl_context);
         NV2A_DPRINTF("------------------CLEAR 0x%x %d,%d - %d,%d  %x---------------\n",
             parameter, xmin, ymin, xmax, ymax, d->pgraph.regs[NV_PGRAPH_COLORCLEARVALUE]);
 
+        // memory_global_dirty_log_sync();
+
         /* Dither */
         /* FIXME: Maybe also disable it here? + GL implementation dependent */
         if (pg->regs[NV_PGRAPH_CONTROL_0] &
@@ -3598,7 +3600,9 @@ static void pgraph_init(NV2AState *d)
 {
     int i;
 
+#if PROFILE_METHODS
     signal(SIGUSR2, dump_stats);
+#endif
 
     PGRAPHState *pg = &d->pgraph;
 
@@ -4610,10 +4614,13 @@ static void pgraph_update_surface_part(NV2AState *d, bool upload, bool color) {
     if (color) {
         // dirty |= 1;
         // SDPRINTF("Testing %08lx... %d -> ", surface->offset, dirty);
-        // dirty |= memory_region_test_and_clear_dirty(d->vram,
-        //                                        dma.address + surface->offset,
-        //                                        surface->pitch * height,
-        //                                        DIRTY_MEMORY_NV2A);
+#if !USE_SHARED_CONTEXT
+        // memory_global_dirty_log_sync();
+        dirty |= memory_region_test_and_clear_dirty(d->vram,
+                                               dma.address + surface->offset,
+                                               surface->pitch * height,
+                                               DIRTY_MEMORY_NV2A);
+#endif
         // SDPRINTF("%d (%s)\n", dirty, dirty ? "DIRTY" : "CLEAN");
     }
     if (upload && dirty) {
@@ -5453,11 +5460,26 @@ static void pgraph_update_memory_buffer(NV2AState *d, hwaddr addr, hwaddr size,
     hwaddr end = TARGET_PAGE_ALIGN(addr + size);
     addr &= TARGET_PAGE_MASK;
     assert(end < memory_region_size(d->vram));
+    
+    // qemu_mutex_lock_iothread();
+    // memory_global_dirty_log_sync();
+    // qemu_mutex_unlock_iothread();
+
+
+    // Slow either way, better to use hashing?
+#if 0
+    // f = true;
+#else
+    // memory_global_dirty_log_sync();
+#endif
+
     if (f || memory_region_test_and_clear_dirty(d->vram,
                                                 addr,
                                                 end - addr,
                                                 DIRTY_MEMORY_NV2A)) {
+#if TRACK_GEOMETRY_CACHE_STATS
         attr_cache_mem_upload++;
+#endif
         SDPRINTF("....-> Actually uploading\n");
         glBufferSubData(GL_ARRAY_BUFFER, addr, end - addr, d->vram_ptr + addr);
         // glFinish();
@@ -5539,7 +5561,9 @@ static void pgraph_bind_vertex_attributes(NV2AState *d,
                 if (!key_out->populated) {
                     SDPRINTF("....uploading\n");
 
+#if TRACK_GEOMETRY_CACHE_STATS
                     attr_cache_miss++;
+#endif
 
                     for (j=attribute->converted_elements; j<num_elements; j++) {
                         uint8_t *in = data + j * in_stride;
@@ -5572,7 +5596,9 @@ static void pgraph_bind_vertex_attributes(NV2AState *d,
                     key_out->populated = 1;
                 } else {
                     SDPRINTF("Re-using buffer!\n");
+#if TRACK_GEOMETRY_CACHE_STATS
                     attr_cache_hit++;
+#endif
                 }
 #else
 
@@ -5619,7 +5645,9 @@ static void pgraph_bind_vertex_attributes(NV2AState *d,
                     0);
             } else if (inline_data) {
                 SDPRINTF("Binding gl_inline_array_buffer\n");
+#if TRACK_GEOMETRY_CACHE_STATS
                 attr_cache_mem_upload2++;
+#endif
                 glBindBuffer(GL_ARRAY_BUFFER, pg->gl_inline_array_buffer);
                 glVertexAttribPointer(i,
                                       attribute->gl_count,
@@ -6309,6 +6337,7 @@ int loc_cache_false_dirty = 0;
 // QemuSpin loc_cache_stats_lock;
 #endif
 
+#if USE_TEXTURE_LOCATION_CACHE
 static struct lru_node *texture_location_cache_entry_init(struct lru_node *obj, void *key)
 {
     // Initializing a new location cache entry
@@ -6357,7 +6386,7 @@ static int texture_location_cache_entry_compare(struct lru_node *obj, void *key)
 
 #define CHECK_FALSE_CLEAN 0 // Check for false clean reports (keep this off for perf)
     // FIXME: This happens, but pretty rarely and it's not noticable... why? Are
-    // we clearing this range somewhere else?
+    // we clearing this range somewhere else? -- Prob due to dirty bmp sync
 
     struct TextureLocationKey *a = container_of(obj, struct TextureLocationKey, node);
     struct TextureLocationKey *b = (struct TextureLocationKey *)key;
@@ -6439,7 +6468,7 @@ static int texture_location_cache_entry_compare(struct lru_node *obj, void *key)
 
     return 0;
 }
-
+#endif
 
 
 

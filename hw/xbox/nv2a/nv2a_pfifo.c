@@ -648,7 +648,7 @@ static void pfifo_run_pusher(NV2AState *d)
                     dma_get_v += 4;
                 }
 
-
+#if 0 // Assertion `program_load < NV2A_MAX_TRANSFORM_PROGRAM_LENGTH' failed.
                 else if ((hack_method >= NV097_SET_TRANSFORM_PROGRAM) && (hack_method <= (NV097_SET_TRANSFORM_PROGRAM + 0x7c))) {
                     // Make sure all queued methods have been executed
                     while ((*status & NV_PFIFO_CACHE1_STATUS_LOW_MARK) == 0) {
@@ -686,7 +686,7 @@ static void pfifo_run_pusher(NV2AState *d)
                         dma_get_v += 4;
                     }
                 }
-
+#endif
 
 
 
@@ -793,6 +793,111 @@ static void pfifo_run_pusher(NV2AState *d)
                             parameter & 0x7fffffff;
 
                         pg->vertex_attributes[slot].converted_elements = 0;
+                        //////////////////////////////////////////////////////////////////
+                        dma_get_v += 4;
+                    }
+                }
+
+                else if ((hack_method >= NV097_SET_VERTEX_DATA_ARRAY_FORMAT) && (hack_method <= (NV097_SET_VERTEX_DATA_ARRAY_FORMAT + 0x3c))) {
+                    // Make sure all queued methods have been executed
+                    while ((*status & NV_PFIFO_CACHE1_STATUS_LOW_MARK) == 0) {
+                        // printf("waiting for puller to finish\n");
+                        puller_cond = 1;
+                        qemu_coroutine_yield();
+                    }
+
+                    uint32_t graphics_class = GET_MASK(pg->regs[NV_PGRAPH_CTX_SWITCH1],
+                                                       NV_PGRAPH_CTX_SWITCH1_GRCLASS);
+                    int hack_count = (word >> 18) & 0x7ff;
+                    assert(graphics_class == NV_KELVIN_PRIMITIVE);
+                    assert((dma_put_v-dma_get_v) >= (hack_count*4));
+
+                    int slot_base = (hack_method - NV097_SET_VERTEX_DATA_ARRAY_FORMAT)/4;
+
+                    // Bulk upload these constants
+                    int islot;
+                    for (islot = 0; islot < hack_count; islot++) {
+                        int slot = islot + slot_base;
+                        uint32_t parameter = ldl_le_p((uint32_t*)(dma + dma_get_v));
+                        //////////////////////////////////////////////////////////////////
+                        // Copy-paste from pgraph.c
+
+
+                        // slot = (method - NV097_SET_VERTEX_DATA_ARRAY_FORMAT) / 4;
+                        VertexAttribute *vertex_attribute = &pg->vertex_attributes[slot];
+
+                        vertex_attribute->format =
+                            GET_MASK(parameter, NV097_SET_VERTEX_DATA_ARRAY_FORMAT_TYPE);
+                        vertex_attribute->count =
+                            GET_MASK(parameter, NV097_SET_VERTEX_DATA_ARRAY_FORMAT_SIZE);
+                        vertex_attribute->stride =
+                            GET_MASK(parameter, NV097_SET_VERTEX_DATA_ARRAY_FORMAT_STRIDE);
+
+                        NV2A_DPRINTF("vertex data array format=%d, count=%d, stride=%d\n",
+                            vertex_attribute->format,
+                            vertex_attribute->count,
+                            vertex_attribute->stride);
+
+                        vertex_attribute->gl_count = vertex_attribute->count;
+
+                        switch (vertex_attribute->format) {
+                        case NV097_SET_VERTEX_DATA_ARRAY_FORMAT_TYPE_UB_D3D:
+                            vertex_attribute->gl_type = GL_UNSIGNED_BYTE;
+                            vertex_attribute->gl_normalize = GL_TRUE;
+                            vertex_attribute->size = 1;
+                            assert(vertex_attribute->count == 4);
+                            // http://www.opengl.org/registry/specs/ARB/vertex_array_bgra.txt
+                            vertex_attribute->gl_count = GL_BGRA;
+                            vertex_attribute->needs_conversion = false;
+                            break;
+                        case NV097_SET_VERTEX_DATA_ARRAY_FORMAT_TYPE_UB_OGL:
+                            vertex_attribute->gl_type = GL_UNSIGNED_BYTE;
+                            vertex_attribute->gl_normalize = GL_TRUE;
+                            vertex_attribute->size = 1;
+                            vertex_attribute->needs_conversion = false;
+                            break;
+                        case NV097_SET_VERTEX_DATA_ARRAY_FORMAT_TYPE_S1:
+                            vertex_attribute->gl_type = GL_SHORT;
+                            vertex_attribute->gl_normalize = GL_TRUE;
+                            vertex_attribute->size = 2;
+                            vertex_attribute->needs_conversion = false;
+                            break;
+                        case NV097_SET_VERTEX_DATA_ARRAY_FORMAT_TYPE_F:
+                            vertex_attribute->gl_type = GL_FLOAT;
+                            vertex_attribute->gl_normalize = GL_FALSE;
+                            vertex_attribute->size = 4;
+                            vertex_attribute->needs_conversion = false;
+                            break;
+                        case NV097_SET_VERTEX_DATA_ARRAY_FORMAT_TYPE_S32K:
+                            vertex_attribute->gl_type = GL_SHORT;
+                            vertex_attribute->gl_normalize = GL_FALSE;
+                            vertex_attribute->size = 2;
+                            vertex_attribute->needs_conversion = false;
+                            break;
+                        case NV097_SET_VERTEX_DATA_ARRAY_FORMAT_TYPE_CMP:
+                            /* 3 signed, normalized components packed in 32-bits. (11,11,10) */
+                            vertex_attribute->size = 4;
+                            vertex_attribute->gl_type = GL_FLOAT;
+                            vertex_attribute->gl_normalize = GL_FALSE;
+                            vertex_attribute->needs_conversion = true;
+                            vertex_attribute->converted_size = sizeof(float);
+                            vertex_attribute->converted_count = 3 * vertex_attribute->count;
+                            break;
+                        default:
+                            fprintf(stderr, "Unknown vertex type: 0x%x\n", vertex_attribute->format);
+                            assert(false);
+                            break;
+                        }
+
+                        if (vertex_attribute->needs_conversion) {
+                            vertex_attribute->converted_elements = 0;
+                        } else {
+                            if (vertex_attribute->converted_buffer) {
+                                g_free(vertex_attribute->converted_buffer);
+                                vertex_attribute->converted_buffer = NULL;
+                            }
+                        }
+
                         //////////////////////////////////////////////////////////////////
                         dma_get_v += 4;
                     }
