@@ -38,6 +38,9 @@ might not fair so well, and some might be broken entirely. Please let me
 know if this works well for you or if it horribly breaks things (but don't
 blame me if your computer crashes!).
 
+When running XQEMU with this branch, you'll need to append `-display
+sdl,gl=on` to your command line.
+
 ---
 
 XQEMU is an open-source emulator to play original Xbox games on Windows, macOS,
