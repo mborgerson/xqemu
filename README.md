@@ -1,5 +1,10 @@
-XQEMU: perf-wip branch
-======================
+XQEMU: perf-wip branch (experimental!)
+======================================
+
+XQEMU is an open-source emulator to play original Xbox games on Windows, macOS,
+and Linux. Please visit [xqemu.com](http://xqemu.com) to learn more.
+
+---
 
 You are looking at my `perf-wip` branch. This branch has highly-experimental
 work focused on dramatically improving the performance of XQEMU. Many of these
@@ -40,14 +45,3 @@ blame me if your computer crashes!).
 
 When running XQEMU with this branch, you'll need to append `-display
 sdl,gl=on` to your command line.
-
----
-
-XQEMU is an open-source emulator to play original Xbox games on Windows, macOS,
-and Linux. Please visit [xqemu.com](http://xqemu.com) to learn more.
-
-Build Status
-------------
-| Windows | Linux | macOS |
-| ------- | ----- | ----- |
-| [![Build status](https://ci.appveyor.com/api/projects/status/8rbaimmbp6k44rab?svg=true)](https://ci.appveyor.com/project/mborgerson/xqemu-c5j6o) | [![Travis-CI Status](https://travis-ci.org/xqemu/xqemu.svg?branch=master)](https://travis-ci.org/xqemu/xqemu) | [![Travis-CI Status](https://travis-ci.org/xqemu/xqemu.svg?branch=master)](https://travis-ci.org/xqemu/xqemu) |
