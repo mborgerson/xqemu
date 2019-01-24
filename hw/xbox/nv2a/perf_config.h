@@ -10,7 +10,7 @@
 // Try to avoid re-uploading textures again and again by keeping them in GPU
 // memory and identifying them using a fast hashing method.
 #define USE_TEXTURE_CACHE 1
-#define USE_TEXTURE_LOCATION_CACHE 1 // FIXME: Need to debug issue with double free
+#define USE_TEXTURE_LOCATION_CACHE 0 // FIXME: Need to debug issue with double free
 #define TRACK_LOCATION_CACHE_STATS 0
 
 // Similar to the texture cache, try to avoid uploading geometry when possible
