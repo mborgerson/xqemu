@@ -901,9 +901,9 @@ static void pgraph_method(NV2AState *d,
 
                 int width = image_blit->width;
                 int height = image_blit->height;
-#if RES_SCALE_4X
-                width *= 2;
-                height *= 2;
+#if RES_SCALE_FACTOR != 1
+                width *= RES_SCALE_FACTOR;
+                height *= RES_SCALE_FACTOR;
 #endif
 
                 glTexImage2D(GL_TEXTURE_2D, 0, gl_internal_format,
@@ -2640,8 +2640,8 @@ glo_set_current(pg->gl_context);
             pgraph_get_surface_dimensions(pg, &width, &height);
             pgraph_apply_anti_aliasing_factor(pg, &width, &height);
 
-#if RES_SCALE_4X
-            glViewport(0, 0, width*2, height*2);
+#if RES_SCALE_FACTOR != 1
+            glViewport(0, 0, width*RES_SCALE_FACTOR, height*RES_SCALE_FACTOR);
 #else
             glViewport(0, 0, width, height);
 #endif
@@ -3109,11 +3109,11 @@ glo_set_current(pg->gl_context);
         pgraph_apply_anti_aliasing_factor(pg, &scissor_width, &scissor_height);
 
         /* FIXME: Should this really be inverted instead of ymin? */
-#if RES_SCALE_4X
-        scissor_width *= 2;
-        scissor_height *= 2;
-        scissor_x *= 2;
-        scissor_y *= 2;
+#if RES_SCALE_FACTOR != 1
+        scissor_width *= RES_SCALE_FACTOR;
+        scissor_height *= RES_SCALE_FACTOR;
+        scissor_x *= RES_SCALE_FACTOR;
+        scissor_y *= RES_SCALE_FACTOR;
 #endif
         glScissor(scissor_x, scissor_y, scissor_width, scissor_height);
 
@@ -3656,11 +3656,7 @@ static void pgraph_init(NV2AState *d)
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8,
-#if RES_SCALE_4X
-        640*2, 480*2,
-#else
-        640, 480,
-#endif
+                 640*RES_SCALE_FACTOR, 480*RES_SCALE_FACTOR,
                  0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
                            GL_TEXTURE_2D, pg->gl_color_buffer, 0);
@@ -4450,11 +4446,11 @@ static void pgraph_bind_shaders(PGRAPHState *pg)
         pgraph_apply_anti_aliasing_factor(pg, &x_min, &y_min);
         pgraph_apply_anti_aliasing_factor(pg, &x_max, &y_max);
 
-#if RES_SCALE_4X
-        x_min *= 2;
-        y_min *= 2;
-        x_max *= 2;
-        y_max *= 2;
+#if RES_SCALE_FACTOR != 1
+        x_min *= RES_SCALE_FACTOR;
+        y_min *= RES_SCALE_FACTOR;
+        x_max *= RES_SCALE_FACTOR;
+        y_max *= RES_SCALE_FACTOR;
 #endif
 
         glProgramUniform4i(pg->fragment_shader_binding->gl_frag_prog,
@@ -4764,8 +4760,8 @@ static void pgraph_update_surface_part(NV2AState *d, bool upload, bool color) {
 #else
         SDPRINTF("Reserving space but skipping upload...\n");
         glTexImage2D(GL_TEXTURE_2D, 0, gl_internal_format,
-#if RES_SCALE_4X
-                     width*2, height*2,
+#if RES_SCALE_FACTOR != 1
+                     width*RES_SCALE_FACTOR, height*RES_SCALE_FACTOR,
 #else
                      width, height,
 #endif
@@ -5319,18 +5315,18 @@ static void pgraph_bind_textures(NV2AState *d)
                     d, surface_cache[index].fence,
                     surface_cache[index].buf_id, surface_cache[index].shape.color_format, GL_TEXTURE_2D,
                     binding->gl_texture, color_format, binding->gl_target,
-#if RES_SCALE_4X
-                    state.width*2, state.height*2
+#if RES_SCALE_FACTOR != 1
+                    state.width*RES_SCALE_FACTOR, state.height*RES_SCALE_FACTOR
 #else
                     state.width, state.height
 #endif
                     , !surface_cache[index].color, 1
                     );
 
-    #if RES_SCALE_4X
+    #if RES_SCALE_FACTOR != 1
                 // Only need to scale for unnormalized coords
                 if (binding->gl_target == GL_TEXTURE_RECTANGLE) {
-                    binding->scale = 2.0f;
+                    binding->scale = RES_SCALE_FACTOR * 1.0f;
                 }
     #endif
 

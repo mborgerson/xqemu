@@ -27,8 +27,8 @@
 // co-routines to switch between the tasks when blocked.
 #define USE_COROUTINES 1
 
-// Enable 4x surface rendering
-#define RES_SCALE_4X 1
+// Upscaled surface rendering - Set to 1 to disable
+#define RES_SCALE_FACTOR 2
 
 // Instead of writing surfaces out to memory...
 // - Hold on to them in a cache as they are likely to be re-used (don't re-upload)

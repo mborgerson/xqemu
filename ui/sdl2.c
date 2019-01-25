@@ -111,11 +111,7 @@ static void sdl2_early_window_create(void)
         "SDL App",
         SDL_WINDOWPOS_CENTERED,
         SDL_WINDOWPOS_CENTERED,
-#if RES_SCALE_4X
-        640*2, 480*2,
-#else 
-        640, 480,
-#endif
+        640*RES_SCALE_FACTOR, 480*RES_SCALE_FACTOR,
         SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE);
     if (m_window == NULL) {
         fprintf(stderr, "Failed to create main window\n");
