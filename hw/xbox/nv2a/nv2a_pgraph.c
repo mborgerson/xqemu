@@ -66,16 +66,18 @@ static void pgraph_render_surface_to_texture(
 #define TDPRINTF(...)
 #endif
 
-// struct timeval tv_start;
-// int tv_start_valid = 0;
+
+#if PROFILE_TIME
+
+struct timeval tv_start;
+int tv_start_valid = 0;
 
 static void print_timestamp(void);
 static void start_frame_timer(void);
 static void stop_frame_timer(void);
 
-static void print_timestamp()
+static void print_timestamp(void)
 {
-#if 0 
     struct timeval tv_now, tv_since_start;
 
     gettimeofday(&tv_now, NULL);
@@ -88,25 +90,21 @@ static void print_timestamp()
     timersub(&tv_now, &tv_start, &tv_since_start);
 
     printf("[%4ld.%06ld] ", tv_since_start.tv_sec, tv_since_start.tv_usec);
-#endif
+
 }
 
-// struct timeval frame_timer_start;
-// int frame_timer_started = 0;
+struct timeval frame_timer_start;
+int frame_timer_started = 0;
 
-static void start_frame_timer()
+static void start_frame_timer(void)
 {
-#if 0
     if (frame_timer_started) return;
     gettimeofday(&frame_timer_start, NULL);
     frame_timer_started = 1;
-#endif
 }
 
-
-static void stop_frame_timer()
+static void stop_frame_timer(void)
 {
-#if 0
     static int i = 0;
 
     if (!frame_timer_started) return;
@@ -122,19 +120,14 @@ static void stop_frame_timer()
         i = 0;
     }
     frame_timer_started = 0;
-#endif
 }
 
-
-
-
-// struct timeval timer_start, timer_stop;
+struct timeval timer_start, timer_stop;
 
 static void time_this(int start);
 
 static void time_this(int start)
 {
-#if 0
     struct timeval tv_now, tv_since_start;
 
     gettimeofday(&tv_now, NULL);
@@ -145,8 +138,12 @@ static void time_this(int start)
         timersub(&tv_now, &timer_start, &tv_since_start);
         printf("[%4ld.%06ld]\n", tv_since_start.tv_sec, tv_since_start.tv_usec);
     }
-#endif
 }
+
+#else
+#define start_frame_timer() do {} while (0)
+#define stop_frame_timer() do {} while (0)
+#endif
 
 volatile int available = 0;
 volatile GLuint fb_tex = 0;

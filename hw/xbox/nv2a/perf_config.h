@@ -2,6 +2,8 @@
 #define PERF_CONFIG_H
 
 // Profiling helpers
+#define PROFILE_TIME 0
+
 #define PROFILE_SURFACES 0
 #define PROFILE_TEXTURES 0
 #define PROFILE_FLIP 0
