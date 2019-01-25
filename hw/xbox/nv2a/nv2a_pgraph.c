@@ -931,7 +931,7 @@ static void pgraph_method(NV2AState *d,
                 //     GLuint dst, GLenum dst_format, GLenum dst_target,
                 //     int width, int height, int src_zeta
                 pgraph_render_surface_to_texture(
-                    d, glFenceSync( GL_SYNC_GPU_COMMANDS_COMPLETE, 0 ),
+                    d, 0,//glFenceSync( GL_SYNC_GPU_COMMANDS_COMPLETE, 0 ),
                     pg->gl_color_buffer, gl_format, GL_TEXTURE_2D,
                     gl_buf, gl_format, GL_TEXTURE_2D,
                     width/4, height, 0, 0
@@ -940,7 +940,7 @@ static void pgraph_method(NV2AState *d,
 
                 int index = surface_cache_store(dest - d->vram_ptr);
                 surface_cache[index].buf_id = gl_buf;
-                surface_cache[index].fence = glFenceSync( GL_SYNC_GPU_COMMANDS_COMPLETE, 0 ); // Should probably be moved below
+                // surface_cache[index].fence = glFenceSync( GL_SYNC_GPU_COMMANDS_COMPLETE, 0 ); // Should probably be moved below
                 surface_cache[index].color = 1; //fixme
                 memcpy(&surface_cache[index].shape, &pg->surface_shape, sizeof(SurfaceShape));
 
@@ -1111,26 +1111,29 @@ static void pgraph_method(NV2AState *d,
             NV2A_GL_DPRINTF(true, "Found GL buf! Making frame available (%d)", surface_cache[index].buf_id);
             // printf("GL buf found in cache! %d\n", surface_cache[index].buf_id);
             fb_tex_tmp = surface_cache[index].buf_id;
-            fence = surface_cache[index].fence;
+            // fence = surface_cache[index].fence;
         } else {
             // printf("GL buf not found :(\n");
             fb_tex_tmp = 0;
-            fence = 0;
+            // fence = 0;
         }
 
 
         if (d->pcrtc.start == pg->gl_color_buffer_offset) {
             // printf("Single Buffered!\n");
             fb_tex_tmp = pg->gl_color_buffer;
-            fence = glFenceSync( GL_SYNC_GPU_COMMANDS_COMPLETE, 0 );
         }
 
 
+        fence = glFenceSync( GL_SYNC_GPU_COMMANDS_COMPLETE, 0 );
 #if 1
         while(1)
         {
             int result = glClientWaitSync(fence, GL_SYNC_FLUSH_COMMANDS_BIT, (GLuint64)(5000000000)); //5 Second timeout
-            if(result != GL_TIMEOUT_EXPIRED) break; //we ignore timeouts and wait until all OpenGL commands are processed!
+            if(result != GL_TIMEOUT_EXPIRED) {
+                glDeleteSync(fence);
+                break; //we ignore timeouts and wait until all OpenGL commands are processed!
+            }
         }
 #endif
 
@@ -3491,7 +3494,8 @@ static void pgraph_render_surface_to_texture(
     m_depth_test = glIsEnabled(GL_DEPTH_TEST);
 
 
-    glWaitSync(fence, 0, GL_TIMEOUT_IGNORED);
+    // glWaitSync(fence, 0, GL_TIMEOUT_IGNORED);
+    // glDeleteSync(fence);
 
     // Render the surface into the texture
     glBindFramebuffer(GL_FRAMEBUFFER, d->pgraph.r2t.copyFb);
@@ -3585,7 +3589,9 @@ static void pgraph_render_surface_to_texture(
 
 #else
     // Reallocate space for new texture dimensions
-    glWaitSync(fence, 0, GL_TIMEOUT_IGNORED);
+    // glWaitSync(fence, 0, GL_TIMEOUT_IGNORED);
+    // glDeleteSync(fence);
+
     glTexImage2D(dst_target, 0, f.gl_internal_format,
         width, height, 0, f.gl_format, f.gl_type, NULL);
     for (int i = 0; i < height; i++) {
@@ -4657,7 +4663,7 @@ static void pgraph_update_surface_part(NV2AState *d, bool upload, bool color) {
             SDPRINTF("Would have released, but instead caching buffer %d\n", *gl_buffer);
             int index = surface_cache_store(*cur_buffer_addr);
             surface_cache[index].buf_id = *gl_buffer;
-            surface_cache[index].fence = glFenceSync( GL_SYNC_GPU_COMMANDS_COMPLETE, 0 ); // Should probably be moved below
+            // surface_cache[index].fence = glFenceSync( GL_SYNC_GPU_COMMANDS_COMPLETE, 0 ); // Should probably be moved below
             surface_cache[index].color = color;
 
             memcpy(&surface_cache[index].shape, &pg->last_surface_shape, sizeof(SurfaceShape));
@@ -4943,7 +4949,7 @@ static void pgraph_update_surface(NV2AState *d, bool upload,
             int index = surface_cache_store(pg->gl_color_buffer_offset);
             surface_cache[index].buf_id = pg->gl_color_buffer;
             surface_cache[index].shape = pg->last_surface_shape;
-            surface_cache[index].fence = glFenceSync( GL_SYNC_GPU_COMMANDS_COMPLETE, 0 ); // Should probably be moved below
+            // surface_cache[index].fence = glFenceSync( GL_SYNC_GPU_COMMANDS_COMPLETE, 0 ); // Should probably be moved below
             surface_cache[index].color = 1;
 #else
             SDPRINTF("Releasing color buffer (%d)\n", pg->gl_color_buffer);
@@ -4967,7 +4973,7 @@ static void pgraph_update_surface(NV2AState *d, bool upload,
             int index = surface_cache_store(pg->gl_zeta_buffer_offset);
             surface_cache[index].buf_id = pg->gl_zeta_buffer;
             surface_cache[index].shape = pg->last_surface_shape;
-            surface_cache[index].fence = glFenceSync( GL_SYNC_GPU_COMMANDS_COMPLETE, 0 ); // Should probably be moved below
+            // surface_cache[index].fence = glFenceSync( GL_SYNC_GPU_COMMANDS_COMPLETE, 0 ); // Should probably be moved below
             surface_cache[index].color = 0;
 #else
             SDPRINTF("Releasing zeta buffer (%d)\n", pg->gl_zeta_buffer);
